@@ -1,0 +1,86 @@
+[mod]
+id = "viewdistance"
+version = "0.2.0"
+priority = 100
+
+[compatibility]
+horizon_revision = "b13dbf0687b545431172466ab4b91d19c3976405"
+
+# The decision logic and the config live in their own crate (std only, unit tested on its own).
+[[crate]]
+id = "core"
+path = "core"
+dependent = "horizon-client"
+
+# config/viewdistance.toml, written with the defaults when missing (API 397).
+[[injection]]
+id = "register-config"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_register_configs"
+helper = "register.rs"
+bindings = [{ name = "configs", ty = "&mut Vec<crate::game::native_configs::NativeConfig>", value = "configs" }]
+
+[[injection]]
+id = "load-config"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_config_loading"
+helper = "load.rs"
+bindings = [{ name = "file", ty = "&crate::game::native_configs::NativeConfigFile", value = "config" }]
+
+[[injection]]
+id = "reload-config"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_config_reloading"
+helper = "reload.rs"
+bindings = [{ name = "file", ty = "&crate::game::native_configs::NativeConfigFile", value = "config" }]
+
+# One check per `ticks-per-check`, at the end of a server tick.
+[[injection]]
+id = "tick"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_server_tick"
+helper = "tick.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "phase", ty = "horizon_client::mod_api::ServerTickPhase", value = "phase" },
+]
+
+# /vdt: registered for operators of `command-min-permission` (API 8).
+[[injection]]
+id = "register-commands"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_register_commands"
+helper = "commands.rs"
+bindings = [{ name = "commands", ty = "&mut Vec<horizon_client::mod_api::NativeCommand>", value = "commands" }]
+
+[[injection]]
+id = "perform-command"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_perform_command"
+helper = "player_command.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "player", ty = "&crate::game::native_server::NativeServerPlayer", value = "player" },
+  { name = "command", ty = "&str", value = "command" },
+  { name = "ran", ty = "&mut bool", value = "ran" },
+]
+
+# The same from the dedicated server's console (API 99).
+[[injection]]
+id = "perform-console-command"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_perform_console_command"
+helper = "console_command.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "command", ty = "&str", value = "command" },
+  { name = "ran", ty = "&mut bool", value = "ran" },
+]
+
+# Emergency relief is undone before the world is saved.
+[[injection]]
+id = "server-stopping"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_server_stopping"
+helper = "stop.rs"
+bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]

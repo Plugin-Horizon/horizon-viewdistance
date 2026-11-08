@@ -1,0 +1,10 @@
+This project is derived from ViewDistanceTweaks, version 2.15.0.
+
+Original project: ViewDistanceTweaks
+Source: https://codeberg.org/LucasTHCR/ViewDistanceTweaks (reference commit a236c49)
+Licence: GNU General Public License version 3 (see LICENSE)
+Copyright: (C) 2026 LucasTHCR (as stated in the original's README "License" section)
+
+The original's plugin.yml names LucasTHCR as its author.
+The Horizon port (mixins/viewdistance) and its decision crate (mixins/viewdistance/core) are written for Horizon
+and are licensed under the same GPL-3.0 terms because they are derived from the original.

@@ -1,0 +1,8 @@
+[package]
+name = "viewdistance-core"
+version = "0.2.0"
+edition = "2021"
+description = "Adaptive view/simulation distance for a Horizon server: the decision logic (std only)"
+license = "GPL-3.0-only"
+
+[dependencies]
