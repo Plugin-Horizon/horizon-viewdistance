@@ -1,16 +1,21 @@
 # horizon-viewdistance
 
-> **Unofficial Rust port of ViewDistanceTweaks for the Horizon server (https://github.com/horizon-rust/horizon). Not affiliated with or endorsed by the ViewDistanceTweaks authors.**
-
-A [Horizon](https://github.com/horizon-rust/horizon) native mod that moves a dedicated server's view and
-simulation distance with its load: it gives distance back while the server has headroom and takes it away
-before players notice lag. It is a rebuild of the idea of the Paper plugin ViewDistanceTweaks, for Horizon's
-mod system (horizon-mixins bundle with its own crate).
+> **Unofficial Rust port of ViewDistanceTweaks for the Horizon server (https://github.com/arismoko/horizon). Not affiliated with or endorsed by the ViewDistanceTweaks authors.**
 
 Derived from ViewDistanceTweaks (https://codeberg.org/LucasTHCR/ViewDistanceTweaks, GPL-3.0), version 2.15.0.
 The port follows that source: the commands, messages, defaults and behaviour are taken from it 1:1 where Horizon allows.
 
 Not affiliated with ViewDistanceTweaks or its authors.
+
+> **Built for and working only with [arismoko/horizon](https://github.com/arismoko/horizon)** (the Horizon fork that carries the mod API). [horizon-rust/horizon](https://github.com/horizon-rust/horizon) is experimental for mods and not supported: the earlier version for its native hooks / horizon-mixins is frozen on the `horizon-plain` branch (work stopped on 2026-11-12).
+
+## Which Horizon
+
+This is a native trait mod: `horizon-mod.toml`, a `Cargo.toml` that depends on `horizon-mod-api`, `src/lib.rs` with the hooks, and the plugin logic in the `core/` crate (plain Rust, no engine needed for its tests).
+
+- Pin: `[native] horizon = "54090ee36c4e2c7b43b66db864220c577b94b7e0"` in `horizon-mod.toml` (game `26.3`). That is a development build of arismoko/horizon `main` plus mod API additions that are not all merged upstream yet, so a stock `main` may lack some host methods this mod calls until they land.
+- It compiled and loaded on that build and was smoke-tested there; it has not seen a long run with real players. Treat it as experimental.
+- Feature descriptions below were written for the earlier horizon-rust version; where they name engine calls (`native_*`) or old file paths, read them as descriptions only. The Known gaps list is current.
 
 ## What Horizon already does, and what this adds
 
@@ -63,13 +68,13 @@ was built for stay off by default:
   permission node of the real plugin's sub-command group (`viewdistancetweaks.vdt.command.<group>`, or
   `viewdistancetweaks.command.vdt` for `/vdt` and `/vdt help`); a permissions mod can grant them, and without one the
   operator level `command-min-permission` decides. The answer texts are those of the original's `messages.yml`
-  (2.15.0) for the sub-commands listed here; see `GAPS.md` for what differs.
+  (2.15.0) for the sub-commands listed here; see the Known gaps section for what differs.
 - **Profiles** (`[profiles.<name>]`, `/vdt profile <name>`): overlays for the thresholds, steps, checks and chunk
   targets, plus the hard caps `max-view-distance-cap` / `max-simulation-distance-cap`, applied after every other
   rule. The shipped file has the original's two examples; `normal` is the plain config.
 - **Chat announcements** (`announce-changes-in-chat`, `announce-format`): to operators of `notify-min-permission`
   (the original's `viewdistancetweaks.notify` defaults to operators; this still checks the operator level only, not
-  the node, see `GAPS.md`).
+  the node, see the Known gaps section).
 - **Emergency relief** (`[emergency-relief]`): at the minimum distances and still above `decrease-mspt-threshold`,
   `weather clear` and `gamerule advance_time false`; put back exactly as it was below `recover-below-mspt` and when
   the server stops.
@@ -88,7 +93,7 @@ was built for stay off by default:
 
 `config/viewdistance.toml`, written with the defaults when missing, reloaded when the file changes. Keys are
 named like the Paper plugin's, with the real `world-settings.default.*` names for the world bounds. The defaults are
-the bundled `config.yml` of ViewDistanceTweaks 2.15.0 (`default.toml` in `mixins/viewdistance/core/`); the two
+the bundled `config.yml` of ViewDistanceTweaks 2.15.0 (`default.toml` in `core/`); the two
 Horizon-only keys `notify-min-permission` and `command-min-permission` are the operator levels for the notify node
 and `/vdt`.
 
@@ -112,7 +117,7 @@ Not ported:
 - `/vdt preset` (its values are not in the data files of the plugin), `/vdt analyze`, `/vdt doctor`, `/vdt pregen`,
   `/vdt update` and the update checker; `use-essentials-if-present`; `never-reduce-below-players`, `priority-world`
   and `exclude` of the world settings (one world only); `sample-window` and `collection-period`. `chunk-weight` is
-  ported: it scales the world's chunks in the budget and shows in `/vdt status --weight`. See `GAPS.md`.
+  ported: it scales the world's chunks in the budget and shows in `/vdt status --weight`. See the Known gaps section.
 Horizon has one world setting for the whole server, so the `world-settings.default` section is the only one read; the nether and the end
 are not told apart. Simulation distance reaches the clients only (see above): with
 `prioritize-simulation-distance = true` the first steps of a decrease do not lower the server's work; set it to
@@ -122,46 +127,22 @@ Assumptions made where the public documentation is silent: when `prioritize-simu
 increases grow the view first and the simulation last (the reverse of a decrease); the emergency clamp may go
 below the configured minimum view distance.
 
-## Build and use
+## Build
 
-Needs a Horizon source checkout at the commit named in `horizon-mixin.toml` and the `horizon-mixins` tool:
+Build it as a native trait mod with arismoko's launcher (see the "native mods" how-to in the arismoko/horizon docs):
 
 ```sh
-mkdir -p work/src work/mods
-git -C <horizon> archive 69fab597a6f0e8a6ce524d38d1b73e599e343034 | tar -x -C work/src
-git -C <horizon> rev-parse 69fab597a6f0e8a6ce524d38d1b73e599e343034 > work/src/.horizon-revision
-cp -r mixins/viewdistance work/mods/
-horizon-mixins apply --workspace work/src --mods work/mods --out work/stage
-cd work/stage && cargo build --profile fast -p horizon-client --no-default-features
+horizon-launcher native-build <path to this folder> --server-output <dir> --version <tag> --trust-native-code
 ```
 
-Unit tests of the decision logic (std only, no Horizon needed):
-`cd mixins/viewdistance/core && cargo test`. Everything added in 0.2.0 is covered there only; the glue
-(`tick.rs`, `command.rs`, `commands.rs`, `stop.rs`) has not been compiled. Unproven in particular: that
-`/vdt` reaches the mod from players and the console, the per-guest radius workaround, `gamerule advance_time` and
-`weather` through `native_run_command`, and that commands still run inside `native_server_stopping`.
-`tools/distance_probe.py <port> <seconds>` joins a throwaway server as a bare protocol client and prints each
-view/simulation distance packet it receives, which is how the change was proven.
+`--trust-native-code` is your consent to compile and run this code inside the server. The logic crate tests run without the engine: `(cd core && cargo test)`.
 
-## Proof of 0.1.0 (2026-11-06, Horizon `69fab597a`, throwaway dedicated server, `view-distance=12`, `simulation-distance=6`)
+## Known gaps
 
-`tools/distance_probe.py` joins as a bare protocol client and prints every distance packet. The config file was
-swapped while the server ran (`ticks-per-check = 20`, `passed-checks-* = 1`).
+What does not work yet on arismoko/horizon (each is marked `TODO(arismoko-api: ...)` in `src/lib.rs`):
 
-| Config swapped in | Engine with the mod: packets the client got |
-|---|---|
-| calm, `mixed` | view 11, view 12, sim 5, sim 6 (view grows first, simulation last) |
-| `proactive`, tiny chunk budget | view 11 + sim 5, then view 10 + sim 4 |
-| calm again | view 11, view 12, sim 5, sim 6 |
-| `reactive`, thresholds 0.0001 ms | sim 5, sim 4, view 11, view 10; log reason `tick time high` |
-
-The same server and the same sequence on the unmodded engine: no distance packet at all and no log line.
-A fresh world with the safeguard on: `View 12 -> 8 (chunk generation)` while the client's chunks were generated, held
-until `passed-checks-for-increase` quiet checks, then `View 8 -> 10 (chunk generation over)`. Startup grace logs
-`Sim 6 -> 5 | View 12 -> 10 (startup grace)`.
-
-Not proven on a server: the memory safeguard, the variance and prediction rules and a real overload (a throwaway
-server with one bare client is never overloaded); they are covered by the unit tests only.
+- Per-player view and simulation distances are logged only; nothing is sent to the client.
+- Idle time is not available, so the AFK throttle sees 0 idle ticks; the generated-chunk total stays 0.
 
 ## Licence
 
@@ -170,7 +151,3 @@ GPL-3.0, see `LICENSE` and `NOTICE`. This port is derived from ViewDistanceTweak
 source was read at commit `a236c49` of that repository (its `config.yml`, `messages.yml` and `plugin.yml` match
 the 2.15.0 jar byte for byte, apart from the version placeholder in `plugin.yml`). Because the port is derived from
 GPL-3.0 code, it is GPL-3.0 as well; the earlier MIT licence no longer applies.
-
-## Contributing
-
-Pull requests and improvements are always welcome! Open an issue or a PR -- direct pushes to main are disabled, every change goes through review.
