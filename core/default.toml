@@ -1,0 +1,152 @@
+# Adaptive view and simulation distance. Keys are named like the Paper plugin ViewDistanceTweaks 2.15.0,
+# and the defaults are its bundled config.yml. Horizon has one world, so only world-settings.default
+# is read (exclude, never-reduce-below-players and priority-world have no effect on one world).
+
+enabled = true
+# proactive (chunk budget), reactive (tick time), mixed (the more pessimistic of both) or off
+adjustment-mode = "mixed"
+# Ticks to wait after the server started before the first check (2400 = 2 minutes).
+start-delay = 2400
+# Ticks between checks (200 = 10 seconds).
+ticks-per-check = 200
+# Consecutive checks that must confirm an increase / a decrease before it is applied.
+passed-checks-for-increase = 9
+passed-checks-for-decrease = 1
+# Log a line when the distances change.
+log-changes = true
+# Tell operators in chat when the distances change (permission viewdistancetweaks.notify).
+announce-changes-in-chat = false
+# {world} {oldSim} {newSim} {oldView} {newView}; & colour codes.
+announce-format = "&7[VDT] &f{world}: Sim &e{oldSim}&7→&a{newSim} &f| View &e{oldView}&7→&a{newView}"
+# Horizon-only: the operator level that the notify node and /vdt fall back to when no permissions mod answers.
+notify-min-permission = 1
+command-min-permission = 1
+
+[proactive-mode-settings]
+# (2*sim+1)^2 * players, and ((2*view+1)^2 - (2*sim+1)^2) * players, both times the chunk weight.
+global-ticking-chunk-count-target = 5780
+global-non-ticking-chunk-count-target = 6720
+# What a server with no players is driven to: min, max or keep.
+empty-world-target = "min"
+
+[reactive-mode-settings]
+# Average tick time (ms) below which an increase is considered / above which a decrease happens.
+increase-mspt-threshold = 40.0
+decrease-mspt-threshold = 47.0
+# Shrink simulation distance first, view distance only once simulation is at its minimum.
+prioritize-simulation-distance = false
+max-increase-step = 2
+max-decrease-step = 4
+# An increase that leaves the server overloaded at the next check is undone at once.
+revert-increase-if-overloaded = true
+
+[reactive-mode-settings.mspt-tracker-settings.mspt-prediction]
+# Block an increase when a line through (loaded chunks, tick time) history predicts overload.
+enabled = true
+history-length = 30   # minutes
+min-samples = 5
+
+[reactive-mode-settings.mspt-tracker-settings.mspt-variance]
+# Treat a server whose last 100 ticks spread too much as overloaded.
+enabled = true
+variance-threshold = 8.0
+min-samples = 20
+block-increase-on-high-variance = true
+min-avg-mspt-to-trigger = 25.0
+
+[chunk-generation-safeguard]
+enabled = true
+# Newly generated chunks per second above which the safeguard trips.
+chunks-per-second-threshold = 8
+lock-increase-during-gen = true
+# View distance while generating (-1: no clamp, only the increase lock).
+emergency-view-distance = 8
+
+[memory-safeguard]
+# Below this share of free system memory distances only go down.
+enabled = true
+min-free-percent = 15.0
+
+[afk-player-throttling]
+# Players idle this long get these personal distances (only what they are sent; see README).
+enabled = false
+afk-time-minutes = 5
+afk-simulation-distance = 4
+afk-view-distance = 6
+
+[ping-throttling]
+# Players whose ping stays above the threshold for checks-before-throttle checks (5 s apart)
+# get these personal distances until one good sample.
+enabled = false
+ping-threshold-ms = 200
+checks-before-throttle = 3
+ping-simulation-distance = 4
+ping-view-distance = 6
+
+[per-player-fixed-view-distance]
+# A player holding the permission <permission-prefix><n> (n 2 to 32; the highest wins) is sent n chunks
+# around them, at most the world's view distance. Needs a permissions mod (operators do not get it).
+enabled = false
+permission-prefix = "viewdistancetweaks.fixed."
+
+[per-player-fixed-simulation-distance]
+# The same for the simulation distance their client is told (never above the world's). Use another
+# prefix than the view distance's.
+enabled = false
+permission-prefix = "viewdistancetweaks.simfixed."
+
+[density-based-scaling]
+# Bonus distance for the chunk budget when players stand together (radius in chunks).
+enabled = false
+cluster-radius = 8
+cluster-player-threshold = 5
+max-bonus = 4
+
+[emergency-relief]
+# At the minimum distances and still overloaded: clear the weather and stop the day cycle,
+# restored below recover-below-mspt and when the server stops.
+enabled = false
+clear-weather = true
+freeze-time = true
+recover-below-mspt = 40.0
+
+[diagnostics]
+# One JSON line per sample/change/note in <world>/viewdistance/diagnostics/<date>.jsonl.
+enabled = false
+interval-seconds = 60
+extra-sample-above-mspt = 0
+record-samples = true
+record-changes = true
+max-file-size-mb = 50
+keep-days = 7
+
+# Overlays switched with /vdt profile <name> ("normal" = the values above). Keys:
+# decrease-mspt-threshold, increase-mspt-threshold, max-increase-step, max-decrease-step,
+# passed-checks-for-increase, passed-checks-for-decrease, global-ticking-chunk-count-target,
+# global-non-ticking-chunk-count-target, max-view-distance-cap, max-simulation-distance-cap.
+# These two are the examples of the bundled config.yml.
+[profiles.event-mode]
+decrease-mspt-threshold = 42.0
+max-view-distance-cap = 8
+passed-checks-for-increase = 60
+
+[profiles.night-mode]
+increase-mspt-threshold = 45.0
+max-increase-step = 2
+
+[startup-grace]
+enabled = false
+simulation-distance = 4
+view-distance = 6
+duration-ticks = 6000
+
+[world-settings.default]
+chunk-weight = 1.0
+
+[world-settings.default.simulation-distance]
+min-simulation-distance = 4
+max-simulation-distance = 12
+
+[world-settings.default.view-distance]
+min-view-distance = 6
+max-view-distance = 16
