@@ -11,7 +11,7 @@
 use mod_api::{
     Command, CommandArgumentValue, Config, ConfigKind, ConfigLoadingEvent, ConfigReloadingEvent,
     Flow, HostSide, Hooks, LevelRef, PlayerRef, RegisterCommandsEvent, RegisterConfigsEvent,
-    RunModCommandEvent, ServerAboutToStartEvent, ServerHost, ServerStoppingEvent, ServerTickEvent,
+    PlayerCommandEvent, RunModCommandEvent, ServerAboutToStartEvent, ServerHost, ServerStoppingEvent, ServerTickEvent,
     ServerTickPhase, Text,
 };
 use std::sync::Mutex;
@@ -34,6 +34,17 @@ struct Mod {
 impl Mod {
     fn actual(&self) -> Distances {
         self.actual.lock().unwrap_or_else(|e| e.into_inner()).unwrap_or(Distances { sim: 10, view: 10 })
+    }
+
+    /// What the server runs at right now (`server_view_distance` / `server_simulation_distance`), the
+    /// start values where the host gives none. The engine compares its pins and decisions with this:
+    /// feeding it the start values made every tick see the old distance and re-apply the change.
+    fn live(&self, host: &dyn ServerHost) -> Distances {
+        let start = self.actual();
+        Distances {
+            sim: host.server_simulation_distance().unwrap_or(start.sim),
+            view: host.server_view_distance().unwrap_or(start.view),
+        }
     }
 }
 
@@ -345,13 +356,32 @@ impl Hooks for Mod {
     }
 
     fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
-        // Each usage carries the original's node (`viewdistancetweaks.vdt.command.<group>`; the bare `/vdt`
-        // and help `viewdistancetweaks.command.vdt`, which as plugin.yml's command permission gates all of
-        // /vdt). The operator level decides when no permissions mod answers.
+        // Bukkit gates all of /vdt with the one plugin.yml `permission:` `viewdistancetweaks.command.vdt`
+        // (default op); the sub-nodes are only declared there. So every usage is gated by the root node
+        // alone: a holder of it runs every sub-command, a holder of only a sub-node runs nothing.
+        // The operator level decides when no permissions mod answers.
         let level = viewdistance_core::permissions().1;
-        for (usage, node) in command::USAGES.iter().zip(command::NODES) {
-            event.commands.push(Command::op(usage, level).with_node(node));
+        for usage in command::USAGES.iter() {
+            event.commands.push(Command::op(usage, level).with_node("viewdistancetweaks.command.vdt"));
         }
+    }
+
+    fn player_command(&self, host: &mut dyn ServerHost, event: &mut PlayerCommandEvent<'_>) -> Flow {
+        // plugin.yml gives `/vdt` the node `viewdistancetweaks.command.vdt` (default op): a player without it
+        // gets Bukkit's no-permission line, not "Unknown command". The node is the provider's answer, else the
+        // operator level `command-min-permission`.
+        let root = event.command.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+        if root != "vdt" {
+            return Flow::Continue;
+        }
+        let level = viewdistance_core::permissions().1;
+        let allowed = host.player(event.player).is_some_and(|p| grants(&*host, p, "viewdistancetweaks.command.vdt", level));
+        if allowed {
+            return Flow::Continue;
+        }
+        event.replies.push(Text::literal("\u{a7}cI'm sorry, but you do not have permission to perform this command. Please contact the server administrators if you believe that this is in error."));
+        event.cancelled = true;
+        Flow::Cancel
     }
 
     fn run_mod_command(&self, host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>) -> Flow {
@@ -367,7 +397,7 @@ impl Hooks for Mod {
         let Some(line) = typed_line(&event.command.literals, &present) else {
             return Flow::Continue;
         };
-        let base = self.actual();
+        let base = self.live(&*host);
         let players = host.players().server_players();
         let loaded = loaded_chunks(&*host);
         let obs = observation(&*host, &players, loaded, false);
@@ -400,7 +430,8 @@ impl Hooks for Mod {
         if !matches!(event.phase, ServerTickPhase::ServerTickEnd { world_running: true }) {
             return;
         }
-        check(host, self.actual());
+        let base = self.live(&*host);
+        check(host, base);
     }
 
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
