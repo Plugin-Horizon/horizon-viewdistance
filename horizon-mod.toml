@@ -2,7 +2,7 @@ id = "viewdistance"
 name = "ViewDistance"
 version = "0.2.0"
 description = "Adaptive view and simulation distance: gives distance back while the server has headroom, takes it away under load (port of ViewDistanceTweaks 2.15.0)."
-authors = ["Plugin-Horizon contributors"]
+authors = ["LionSpacer"]
 api = "0.2"
 capabilities = ["registries"]
 
