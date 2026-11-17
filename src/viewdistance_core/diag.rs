@@ -1,7 +1,7 @@
 //! Diagnostics: one JSON line per sample, distance change or note, in one file a day
 //! (`<dir>/<YYYY-MM-DD>.jsonl`, UTC). No player names. Old files are deleted after `keep-days`
 //! (not compressed: the original packs them as .jsonl.gz, this port stays std only).
-use crate::engine::{Change, Distances};
+use crate::viewdistance_core::engine::{Change, Distances};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 

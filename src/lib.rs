@@ -8,15 +8,18 @@
 //!
 //! Config: `config/viewdistance.toml`, registered with `register_configs` so the game writes the
 //! defaults when it is missing. The distances the server starts with come from `server.properties`.
+
+pub mod viewdistance_core;
 use mod_api::{
     Command, CommandArgumentValue, Config, ConfigKind, ConfigLoadingEvent, ConfigReloadingEvent,
     Flow, HostSide, Hooks, LevelRef, PlayerRef, RegisterCommandsEvent, RegisterConfigsEvent,
     PlayerCommandEvent, RunModCommandEvent, ServerAboutToStartEvent, ServerHost, ServerStoppingEvent, ServerTickEvent,
     ServerTickPhase, Text,
+    NodeDefault, PermissionGatherNodesEvent, PermissionLevel, PermissionNode, PermissionValueType,
 };
 use std::sync::Mutex;
-use viewdistance_core::command;
-use viewdistance_core::{Change, Distances, Event, Observation, PlayerSample};
+use crate::viewdistance_core::command;
+use crate::viewdistance_core::{Change, Distances, Event, Observation, PlayerSample};
 
 const ID: &str = "viewdistance";
 const CONFIG_FILE: &str = "viewdistance.toml";
@@ -53,7 +56,7 @@ fn log(line: &str) {
 }
 
 fn load(text: &str) {
-    for problem in viewdistance_core::load_config(text) {
+    for problem in crate::viewdistance_core::load_config(text) {
         log(&format!("config: {problem}"));
     }
 }
@@ -90,12 +93,15 @@ fn plain(text: &str) -> String {
     out
 }
 
-/// Whether `player` holds `node`: the value a permission provider gives, or the operator fallback
-/// `level` when none decided.
-fn grants(host: &dyn ServerHost, player: PlayerRef, node: &str, level: u8) -> bool {
-    player
-        .permission_value(host, node)
-        .unwrap_or_else(|| player.permission_level(host).unwrap_or(0) >= level)
+/// The typed node for one `viewdistancetweaks.*` name (a Boolean, as the commands ask it).
+fn perm_node(name: &str) -> PermissionNode {
+    PermissionNode::new(name, PermissionValueType::Boolean)
+}
+
+/// Whether `player` holds `node`: the provider's answer, else the node's declared default (the operator level, see
+/// `permission_gather_nodes`). An undeclared node or an error is a denial. `_level` is that default, kept for the callers.
+fn grants(host: &mut dyn ServerHost, player: PlayerRef, node: &str, _level: u8) -> bool {
+    player.permission_bool(host, &perm_node(node)).unwrap_or(false)
 }
 
 fn overworld(host: &dyn ServerHost) -> Option<LevelRef> {
@@ -181,7 +187,7 @@ fn observation(host: &dyn ServerHost, players: &[PlayerRef], loaded: u32, with_c
         samples_ms: tick_samples_ms(host),
         loaded_chunks: loaded,
         generated_total: 0,
-        free_memory_percent: viewdistance_core::free_memory_percent(),
+        free_memory_percent: crate::viewdistance_core::free_memory_percent(),
         tps: Some(tps),
         player_chunks,
     }
@@ -225,11 +231,11 @@ fn check(host: &mut dyn ServerHost, base: Distances) {
     let loaded = loaded_chunks(&*host);
     let change = {
         let view: &dyn ServerHost = &*host;
-        viewdistance_core::tick(base, || observation(view, &players, loaded, true))
+        crate::viewdistance_core::tick(base, || observation(view, &players, loaded, true))
     };
     if let Some(c) = change.as_ref() {
         let applied = apply_world_distances(host, c);
-        if viewdistance_core::log_changes() {
+        if crate::viewdistance_core::log_changes() {
             let note = if applied { "" } else { "; not applied" };
             log(&format!(
                 "Sim {} -> {} | View {} -> {} ({}){note}",
@@ -241,43 +247,39 @@ fn check(host: &mut dyn ServerHost, base: Distances) {
     // Personal distances: AFK and ping throttles, and `viewdistancetweaks.fixed.<n>` /
     // `.simfixed.<n>` by permission. Idle time is not available (TODO(arismoko-api:
     // player_idle_ticks)), so the AFK throttle sees 0.
-    let (view_prefix, sim_prefix) = viewdistance_core::fixed_prefixes();
-    let samples: Vec<PlayerSample> = if viewdistance_core::personal_due() {
+    // HMOD-GAP(player-latency): Horizon main has no player ping, so the ping throttle sees 0 ms and never lowers a player.
+    // HMOD-GAP(fixed-distance-nodes): `<prefix><n>` (n 2 to 32) is not declared at gather time (its prefix comes from the
+    // config and the node's default would have to be "nobody", which a permission level cannot say). Undeclared, it is
+    // refused: the per-player fixed view and simulation distances are not applied on Horizon main.
+    let samples: Vec<PlayerSample> = if crate::viewdistance_core::personal_due() {
         players
             .iter()
-            .map(|p| {
-                let view: &dyn ServerHost = &*host;
-                PlayerSample {
-                    id: p.uuid(),
-                    idle_ticks: 0,
-                    ping_ms: p.latency(view).unwrap_or(0),
-                    fixed_view: view_prefix.as_deref().and_then(|prefix| {
-                        viewdistance_core::fixed_distance(prefix, |node| grants(view, *p, node, FIXED_LEVEL))
-                    }),
-                    fixed_sim: sim_prefix.as_deref().and_then(|prefix| {
-                        viewdistance_core::fixed_distance(prefix, |node| grants(view, *p, node, FIXED_LEVEL))
-                    }),
-                }
+            .map(|p| PlayerSample {
+                id: p.uuid(),
+                idle_ticks: 0,
+                ping_ms: 0,
+                fixed_view: None,
+                fixed_sim: None,
             })
             .collect()
     } else {
         Vec::new()
     };
-    let mut personal = viewdistance_core::personal(|| samples);
+    let mut personal = crate::viewdistance_core::personal(|| samples);
     if change.as_ref().is_some_and(|c| c.to.view != c.from.view) {
         // The world's distance was set again, so everyone is back on it.
-        personal.extend(viewdistance_core::throttled().into_iter().map(|(id, d, _)| (id, Some(d))));
+        personal.extend(crate::viewdistance_core::throttled().into_iter().map(|(id, d, _)| (id, Some(d))));
     }
     apply_personal(host, &personal);
 
     // Notices go to the players who hold `viewdistancetweaks.notify` (operators of `notify-min-permission`).
-    let events = viewdistance_core::take_events();
+    let events = crate::viewdistance_core::take_events();
     if !events.is_empty() {
-        let notify_level = viewdistance_core::permissions().0.max(1);
+        let notify_level = crate::viewdistance_core::permissions().0.max(1);
         let notified: Vec<PlayerRef> = players
             .iter()
             .copied()
-            .filter(|p| grants(&*host, *p, command::NOTIFY_NODE, notify_level))
+            .filter(|p| grants(&mut *host, *p, command::NOTIFY_NODE, notify_level))
             .collect();
         for event in events {
             match event {
@@ -296,13 +298,13 @@ fn check(host: &mut dyn ServerHost, base: Distances) {
                         }
                         None => (0.0, 0.0, true),
                     };
-                    for command in viewdistance_core::relief_start(rain > 0.2, thunder > 0.9, advance) {
+                    for command in crate::viewdistance_core::relief_start(rain > 0.2, thunder > 0.9, advance) {
                         let _ = host.commands().run_command(&command);
                     }
                     log("WARN emergency relief on");
                 }
                 Event::ReliefEnd => {
-                    for command in viewdistance_core::relief_end() {
+                    for command in crate::viewdistance_core::relief_end() {
                         let _ = host.commands().run_command(&command);
                     }
                     log("emergency relief over");
@@ -316,22 +318,36 @@ fn check(host: &mut dyn ServerHost, base: Distances) {
         let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let (mspt, _) = tick_figures(&*host);
         let (players_now, loaded) = (players.len() as u32, loaded_chunks(&*host));
-        viewdistance_core::diagnostics(&dir, unix, change, mspt, || viewdistance_core::diag::Sample {
+        crate::viewdistance_core::diagnostics(&dir, unix, change, mspt, || crate::viewdistance_core::diag::Sample {
             mspt,
             players: players_now,
             loaded_chunks: loaded,
             distances: base,
-            free_memory_percent: viewdistance_core::free_memory_percent(),
-            relief: viewdistance_core::relief_active(),
-            profile: viewdistance_core::profile_name(),
+            free_memory_percent: crate::viewdistance_core::free_memory_percent(),
+            relief: crate::viewdistance_core::relief_active(),
+            profile: crate::viewdistance_core::profile_name(),
         });
     }
 }
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
+    fn permission_gather_nodes(&self, event: &mut PermissionGatherNodesEvent<'_>) {
+        // The `/vdt` root node at `command-min-permission`, and the notice node at `notify-min-permission` (as the
+        // fallbacks were). The per-usage sub-nodes are not checked by the port, so they are not declared.
+        let (notify_level, command_level) = crate::viewdistance_core::permissions();
+        let _ = event.nodes.add(
+            perm_node("viewdistancetweaks.command.vdt"),
+            NodeDefault::Level(PermissionLevel::from_level(i32::from(command_level))),
+        );
+        let _ = event.nodes.add(
+            perm_node(command::NOTIFY_NODE),
+            NodeDefault::Level(PermissionLevel::from_level(i32::from(notify_level.max(1)))),
+        );
+    }
+
     fn register_configs(&self, _: HostSide, event: &mut RegisterConfigsEvent<'_>) {
-        let mut config = Config::new(ID, ConfigKind::Common, viewdistance_core::DEFAULT_TOML);
+        let mut config = Config::new(ID, ConfigKind::Common, crate::viewdistance_core::DEFAULT_TOML);
         config.file = CONFIG_FILE.to_string();
         event.configs.push(config);
     }
@@ -360,9 +376,9 @@ impl Hooks for Mod {
         // (default op); the sub-nodes are only declared there. So every usage is gated by the root node
         // alone: a holder of it runs every sub-command, a holder of only a sub-node runs nothing.
         // The operator level decides when no permissions mod answers.
-        let level = viewdistance_core::permissions().1;
+        let level = crate::viewdistance_core::permissions().1;
         for usage in command::USAGES.iter() {
-            event.commands.push(Command::op(usage, level).with_node("viewdistancetweaks.command.vdt"));
+            event.commands.push(Command::op(usage, level).with_node(&perm_node("viewdistancetweaks.command.vdt")));
         }
     }
 
@@ -374,8 +390,8 @@ impl Hooks for Mod {
         if root != "vdt" {
             return Flow::Continue;
         }
-        let level = viewdistance_core::permissions().1;
-        let allowed = host.player(event.player).is_some_and(|p| grants(&*host, p, "viewdistancetweaks.command.vdt", level));
+        let level = crate::viewdistance_core::permissions().1;
+        let allowed = host.player(event.player).is_some_and(|p| grants(&mut *host, p, "viewdistancetweaks.command.vdt", level));
         if allowed {
             return Flow::Continue;
         }
@@ -401,7 +417,7 @@ impl Hooks for Mod {
         let players = host.players().server_players();
         let loaded = loaded_chunks(&*host);
         let obs = observation(&*host, &players, loaded, false);
-        let Some(reply) = viewdistance_core::command(&line, base, &obs) else {
+        let Some(reply) = crate::viewdistance_core::command(&line, base, &obs) else {
             return Flow::Continue;
         };
         let mut lines = reply.lines;
@@ -410,14 +426,14 @@ impl Hooks for Mod {
             match std::fs::read_to_string(&path) {
                 Ok(text) => {
                     lines.push("&aConfiguration reloaded.".into());
-                    lines.extend(viewdistance_core::load_config(&text).into_iter().map(|p| format!("&e{p}")));
+                    lines.extend(crate::viewdistance_core::load_config(&text).into_iter().map(|p| format!("&e{p}")));
                 }
                 Err(e) => lines.push(format!("&c{e}")),
             }
         }
         if let (Some(d), Some(world)) = (reply.diagnose.as_ref(), host.world_dir()) {
             let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-            viewdistance_core::diagnose(d, &world.join("viewdistance").join("diagnostics"), unix);
+            crate::viewdistance_core::diagnose(d, &world.join("viewdistance").join("diagnostics"), unix);
         }
         for line in lines {
             let text = coloured(&*host, &line);
@@ -436,7 +452,7 @@ impl Hooks for Mod {
 
     fn server_stopping(&self, host: &mut dyn ServerHost, _: &mut ServerStoppingEvent) {
         // Emergency relief is undone before the world is saved, since the game rules are saved with it.
-        for command in viewdistance_core::relief_end() {
+        for command in crate::viewdistance_core::relief_end() {
             let _ = host.commands().run_command(&command);
         }
     }

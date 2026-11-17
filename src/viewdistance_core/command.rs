@@ -1,6 +1,6 @@
 //! `/vdt`: the answers, as `&`-coded lines. The texts are the original's English defaults; the
 //! server's one world is called "world".
-use crate::engine::{std_dev, Distances, Engine, Observation};
+use crate::viewdistance_core::engine::{std_dev, Distances, Engine, Observation};
 
 /// The usages registered with the server (completion and operator level): one per real sub-command
 /// path, with literals for the fixed words and typed arguments for the rest. `--duration` and the
@@ -450,10 +450,10 @@ fn pin(e: &mut Engine, sim: bool, args: &[&str], cur: Distances) -> Vec<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use crate::viewdistance_core::config::Config;
 
     fn engine() -> Engine {
-        Engine::new(Config::parse(crate::DEFAULT_TOML).0)
+        Engine::new(Config::parse(crate::viewdistance_core::DEFAULT_TOML).0)
     }
 
     fn obs() -> Observation {

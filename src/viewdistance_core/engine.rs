@@ -1,6 +1,6 @@
 //! The decision logic: from what the server looks like every `ticks-per-check` ticks to the view and
 //! simulation distance it should run at. No game types, so it is tested on its own.
-use crate::config::{Config, EmptyTarget, Mode};
+use crate::viewdistance_core::config::{Config, EmptyTarget, Mode};
 use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,7 +35,7 @@ pub struct PlayerSample {
     /// Ticks since the player's last action (the server's idle timer).
     pub idle_ticks: u64,
     pub ping_ms: i32,
-    /// The distances the player's `per-player-fixed-*` permission gives them (see [`crate::fixed_distance`]).
+    /// The distances the player's `per-player-fixed-*` permission gives them (see [`crate::viewdistance_core::fixed_distance`]).
     pub fixed_view: Option<i32>,
     pub fixed_sim: Option<i32>,
 }

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 /// The file written when `config/viewdistance.toml` is missing.
-pub const DEFAULT_TOML: &str = include_str!("../default.toml");
+pub const DEFAULT_TOML: &str = include_str!("../../data/viewdistance/default.toml");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
