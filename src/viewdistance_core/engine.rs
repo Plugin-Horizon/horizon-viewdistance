@@ -133,7 +133,7 @@ impl Engine {
     }
 
     /// New settings; the streaks and the tick history start over, the distances, the active
-    /// profile (while it still exists) and `/vdt enable|disable` stay. Pins end, as a reload ends
+    /// profile (while it still exists) stay; `enabled` is read again, as in the original. Pins end, as a reload ends
     /// the original's overrides.
     pub fn set_config(&mut self, cfg: Config) {
         let profile = self.profile.take().filter(|p| cfg.with_profile(p).is_some());
@@ -144,7 +144,7 @@ impl Engine {
         self.ticks = old.ticks;
         self.now = old.now;
         self.grace_done = old.grace_done;
-        self.switched = old.switched;
+        // `switched` is dropped: a reload re-reads `enabled`, so it also undoes `/vdt disable`.
         self.changes = old.changes;
         self.relief = old.relief;
         self.events = old.events;
@@ -288,6 +288,11 @@ impl Engine {
         if pinned != actual {
             return Some(Change { from: actual, to: pinned, reason: "command override" });
         }
+        if !self.active() && self.relief {
+            // Disabled while relief was on: put the weather and the day cycle back.
+            self.relief = false;
+            self.events.push(Event::ReliefEnd);
+        }
         if !self.active() || self.cfg.mode == Mode::Off {
             return None;
         }
@@ -403,7 +408,10 @@ impl Engine {
         let low_memory = c.memory_safeguard && o.free_memory_percent.is_some_and(|f| f < c.memory_min_free_percent);
         // The tick time history for the prediction, kept to `history-length` minutes.
         let keep = (c.prediction_history_minutes * 60 * 20 / c.ticks_per_check).max(2) as usize;
-        self.history.push_back((f64::from(o.loaded_chunks), o.mspt));
+        // Like the original, the x of a sample is the chunk count the distances in force imply for the
+        // players (weighted), not the number of loaded chunks.
+        let implied = (f64::from(2 * cur.view + 1).powi(2) * f64::from(o.players) * c.chunk_weight).trunc();
+        self.history.push_back((implied, o.mspt));
         while self.history.len() > keep {
             self.history.pop_front();
         }
@@ -469,10 +477,14 @@ impl Engine {
                 && !(unstable && c.variance_block_increase)
                 && !self.prediction_blocks(cur, o);
             if overloaded {
-                want = self.step(cur, false, c.max_decrease_step);
+                // One extra step for every 5 ms over the threshold, at most `max-decrease-step`.
+                let steps = (1 + ((o.mspt - c.decrease_mspt) / 5.0).floor() as i32).max(1).min(c.max_decrease_step);
+                want = self.step(cur, false, steps);
                 reason = if unstable && o.mspt <= c.decrease_mspt { "tick time unstable" } else { "tick time high" };
             } else if can_up {
-                want = self.step(cur, true, c.max_increase_step);
+                // One extra step for every 5 ms under the threshold, at most `max-increase-step`.
+                let steps = (1 + ((c.increase_mspt - o.mspt) / 5.0).floor() as i32).max(1).min(c.max_increase_step);
+                want = self.step(cur, true, steps);
                 reason = "tick time low";
             }
         }
@@ -482,7 +494,12 @@ impl Engine {
             if c.mode == Mode::Proactive {
                 want = target;
             } else {
-                want = Distances { sim: want.sim.min(target.sim), view: want.view.min(target.view) };
+                // Overloaded: the lower distances win; otherwise the higher ones (an increase is allowed).
+                want = if overloaded {
+                    Distances { sim: want.sim.min(target.sim), view: want.view.min(target.view) }
+                } else {
+                    Distances { sim: want.sim.max(target.sim), view: want.view.max(target.view) }
+                };
             }
             if want != cur && reason == "hold" || c.mode == Mode::Proactive {
                 reason = "chunk budget";
@@ -596,15 +613,20 @@ impl Engine {
                 EmptyTarget::Keep => cur,
             };
         }
-        // The world's chunk weight scales its chunks in the budget (`world-settings.default.chunk-weight`).
-        let n = f64::from(players) * c.chunk_weight;
-        let square = |d: i32| f64::from(2 * d + 1).powi(2);
-        let sim = (c.min_sim..=c.max_sim).rev().find(|&s| square(s) * n <= c.ticking_target).unwrap_or(c.min_sim);
-        let view = (c.min_view..=c.max_view)
-            .rev()
-            .find(|&v| (square(v) - square(sim)) * n <= c.non_ticking_target)
-            .unwrap_or(c.min_view);
-        self.bounded(Distances { sim: sim + bonus, view: view + bonus })
+        // With one world its weight is its whole share (`target * weight / weight`), so the chunk weight
+        // changes nothing here; it only scales the counted chunks (see the prediction history).
+        let n = f64::from(players);
+        // (2d+1)^2 * n = allowed  =>  d = (sqrt(allowed / n) - 1) / 2, rounded like the original.
+        let allowed_ticking = c.ticking_target.trunc();
+        let sim_raw = ((allowed_ticking / n).sqrt() - 1.0) / 2.0;
+        let sim = (sim_raw.round() as i32 + bonus).max(c.min_sim);
+        // ((2v+1)^2 - (2s+1)^2) * n = allowedNonTicking
+        let allowed_non_ticking = c.non_ticking_target.trunc();
+        let side = f64::from(2 * sim + 1);
+        let rhs = allowed_non_ticking / n + side * side;
+        let view_raw = (rhs.max(0.0).sqrt() - 1.0) / 2.0;
+        let view = (view_raw.round() as i32 + bonus).max(sim);
+        self.bounded(Distances { sim, view })
     }
 
     /// Whether a line through the (loaded chunks, tick time) history says one step up would overload.
@@ -625,11 +647,11 @@ impl Engine {
             return false;
         }
         let slope = sxy / sxx;
-        // One step up grows every player's square of chunks.
-        let ratio = f64::from(2 * (cur.view + 1) + 1).powi(2) / f64::from(2 * cur.view + 1).powi(2);
-        let after = f64::from(o.loaded_chunks) * ratio;
+        // The original asks the line about the chunks of the next simulation distance for the players.
+        let new_sim = (cur.sim + 1).min(c.max_sim);
+        let after = f64::from(2 * new_sim + 1).powi(2) * f64::from(o.players.max(1));
         let predicted = my + slope * (after - mx);
-        predicted > c.decrease_mspt
+        predicted >= c.decrease_mspt
     }
 }
 
@@ -752,11 +774,48 @@ mod tests {
     }
 
     #[test]
-    fn mixed_mode_follows_the_tighter_chunk_budget() {
-        // 40 players: sim 6 would be 169 * 40 = 6760 > 5780, so the budget caps sim at 5 (121 * 40).
+    fn mixed_mode_takes_the_lower_target_when_overloaded_and_the_higher_when_not() {
+        // 40 players: 5780 / 40 = 144.5 chunks each, sqrt 12.02, (12.02 - 1) / 2 = 5.51 -> sim 6 (rounded).
+        // The budget sim is 6 and view 6 + ..., so overloaded the reactive step down (5) is the lower one.
         let mut e = engine(&format!("passed-checks-for-increase = 1\n{NO_GRACE}"));
-        let (d, _) = run(&mut e, Distances { sim: 6, view: 12 }, 2400, &calm(40));
+        let (d, _) = run(&mut e, Distances { sim: 6, view: 12 }, 2400, &hot(40, 60.0));
         assert_eq!(d.sim, 5);
+        // Not overloaded: the higher of budget (6) and reactive (6 stays) wins, so nothing is cut.
+        let mut e = engine(&format!("passed-checks-for-increase = 1\n{NO_GRACE}"));
+        let (d, changes) = run(&mut e, Distances { sim: 6, view: 12 }, 2400, &calm(40));
+        assert_eq!(d.sim, 6);
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn reactive_steps_grow_with_the_distance_to_the_threshold() {
+        // Threshold 47: 60 ms is 13 over -> 1 + 2 = 3 steps, capped by `max-decrease-step = 2`.
+        let mut e = engine(&format!(
+            "adjustment-mode = \"reactive\"\n{NO_GRACE}[reactive-mode-settings]\nmax-increase-step = 2\nmax-decrease-step = 2\nprioritize-simulation-distance = true\n"
+        ));
+        let (d, _) = run(&mut e, Distances { sim: 6, view: 12 }, 2400, &hot(3, 60.0));
+        assert_eq!(d, Distances { sim: 4, view: 12 });
+        // 48 ms is 1 over -> one step.
+        let mut e = engine(&format!(
+            "adjustment-mode = \"reactive\"\n{NO_GRACE}[reactive-mode-settings]\nmax-increase-step = 3\nmax-decrease-step = 3\nprioritize-simulation-distance = true\n"
+        ));
+        let (d, _) = run(&mut e, Distances { sim: 6, view: 12 }, 2400, &hot(3, 48.0));
+        assert_eq!(d, Distances { sim: 5, view: 12 });
+    }
+
+    #[test]
+    fn a_reload_enables_the_engine_again_and_a_disabled_engine_ends_relief() {
+        let mut e = engine(&format!("[emergency-relief]\nenabled = true\n{NO_GRACE}"));
+        let floor = Distances { sim: 4, view: 10 };
+        run(&mut e, floor, 2400, &hot(3, 60.0));
+        assert!(e.relief_active());
+        e.take_events();
+        e.switch(false);
+        e.tick(floor, || unreachable!());
+        assert!(!e.relief_active());
+        assert_eq!(e.take_events(), vec![Event::ReliefEnd]);
+        e.set_config(old_config(NO_GRACE));
+        assert!(e.active());
     }
 
     #[test]
@@ -764,8 +823,9 @@ mod tests {
         let e = engine("[world-settings.default.simulation-distance]\nmin-simulation-distance = 2\nmax-simulation-distance = 12\n[world-settings.default.view-distance]\nmin-view-distance = 2\nmax-view-distance = 12\n");
         // 20 players: sim 8 -> 289 * 20 = 5780; view 12 -> (625 - 289) * 20 = 6720.
         assert_eq!(e.budget(20, D), Distances { sim: 8, view: 12 });
-        // One more player no longer fits sim 8.
-        assert_eq!(e.budget(21, D).sim, 7);
+        // The original rounds: 21 players give 275.2 chunks each, d = 7.79 -> 8; 23 give 251.3, d = 7.42 -> 7.
+        assert_eq!(e.budget(21, D).sim, 8);
+        assert_eq!(e.budget(23, D).sim, 7);
     }
 
     #[test]
@@ -859,10 +919,11 @@ mod tests {
             let chunks = 300 + i * 20;
             hist.history.push_back((f64::from(chunks), f64::from(chunks) * 0.1));
         }
-        let now = Observation { mspt: 39.0, loaded_chunks: 440, ..calm(3) };
+        // The line is asked about (2 * 5 + 1)^2 * 4 = 484 chunks (one sim step up, 4 players): 48.4 ms >= 47.
+        let now = Observation { mspt: 39.0, ..calm(4) };
         assert!(hist.prediction_blocks(low, &now));
-        let small = Observation { mspt: 20.0, loaded_chunks: 200, ..calm(3) };
-        assert!(!hist.prediction_blocks(low, &small));
+        // 3 players: 363 chunks -> 36.3 ms.
+        assert!(!hist.prediction_blocks(low, &calm(3)));
     }
 
     #[test]
@@ -965,7 +1026,7 @@ mod tests {
         assert_eq!(cluster_bonus(&crowd, 8, 7, 4), 0);
         assert_eq!(cluster_bonus(&[], 8, 1, 4), 0);
         let e = engine("[world-settings.default.simulation-distance]\nmin-simulation-distance = 2\nmax-simulation-distance = 12\n[world-settings.default.view-distance]\nmin-view-distance = 2\nmax-view-distance = 12\n");
-        assert_eq!(e.budget_with(21, D, 1).sim, 8);
+        assert_eq!(e.budget_with(23, D, 1).sim, 8);
     }
 
     #[test]
@@ -997,7 +1058,8 @@ mod tests {
         let e = engine(NO_GRACE);
         let cur = Distances { sim: 4, view: 10 };
         let (to, reason, now) = e.simulate(cur, &calm(3));
-        assert_eq!((to, reason, now), (Distances { sim: 4, view: 11 }, "tick time low", false));
+        // Mixed and not overloaded: the higher of the budget and the reactive step wins, within one step.
+        assert_eq!((to, reason, now), (Distances { sim: 5, view: 11 }, "tick time low", false));
         let (to, _, now) = e.simulate(Distances { sim: 6, view: 12 }, &hot(3, 60.0));
         assert_eq!((to.sim, now), (5, true));
         assert_eq!(e.ticks(), 0);
