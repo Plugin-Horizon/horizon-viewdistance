@@ -522,7 +522,7 @@ impl Engine {
             if c.gen_lock_increase {
                 want = Distances { sim: want.sim.min(cur.sim), view: want.view.min(cur.view) };
             }
-            if c.gen_emergency_view >= 0 && want.view > c.gen_emergency_view {
+            if c.gen_emergency_view > 0 && want.view > c.gen_emergency_view {
                 want.view = c.gen_emergency_view;
                 want.sim = want.sim.min(want.view);
                 reason = "chunk generation";
