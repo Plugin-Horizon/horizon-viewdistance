@@ -2,9 +2,8 @@
 //! unchanged `viewdistance-core` crate; this file only wires it to hooks, host methods and commands.
 //!
 //! The world's view and simulation distance are set live (`server_set_view_distance`, ...). What
-//! arismoko does not have yet is marked `TODO(arismoko-api: <name>)` and listed in PORT_NOTES.md:
-//! per-player distances, idle time, the generated-chunk total. Until then the throttles see 0 idle
-//! ticks and the per-player changes are logged only.
+//! Horizon main does not have yet is marked `HMOD-GAP(<name>)` and listed in HMOD_PORT.md: per-player
+//! distances, idle time, player ping. Until then the throttles see 0 idle ticks and 0 ms.
 //!
 //! Config: `config/viewdistance.toml`, registered with `register_configs` so the game writes the
 //! defaults when it is missing. The distances the server starts with come from `server.properties`.
@@ -13,10 +12,11 @@ pub mod viewdistance_core;
 use mod_api::{
     Command, CommandArgumentValue, Config, ConfigKind, ConfigLoadingEvent, ConfigReloadingEvent,
     Flow, HostSide, Hooks, LevelRef, PlayerRef, RegisterCommandsEvent, RegisterConfigsEvent,
-    PlayerCommandEvent, RunModCommandEvent, ServerAboutToStartEvent, ServerHost, ServerStoppingEvent, ServerTickEvent,
-    ServerTickPhase, Text,
+    ChunkLoadEvent, PlayerCommandEvent, RunModCommandEvent, ServerAboutToStartEvent, ServerHost, ServerStoppingEvent, ServerTickEvent,
+    ServerTickPhase, Suggestion, TabCompleteEvent, Text,
     NodeDefault, PermissionGatherNodesEvent, PermissionLevel, PermissionNode, PermissionValueType,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use crate::viewdistance_core::command;
 use crate::viewdistance_core::{Change, Distances, Event, Observation, PlayerSample};
@@ -27,6 +27,9 @@ const OVERWORLD: &str = "minecraft:overworld";
 /// The level the original asks for its fixed-distance nodes: a permissions mod must grant them,
 /// the operator fallback stays out (no arismoko operator level reaches 5).
 const FIXED_LEVEL: u8 = 5;
+
+/// Chunks generated (not read from the save) since the server started, counted in `chunk_load`.
+static GENERATED: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Default)]
 struct Mod {
@@ -177,7 +180,6 @@ fn tick_samples_ms(host: &dyn ServerHost) -> Vec<f64> {
 }
 
 /// What a check or a `/vdt` answer looks at, from the running server.
-/// TODO(arismoko-api: level_chunks_generated): `generated_total` stays 0.
 fn observation(host: &dyn ServerHost, players: &[PlayerRef], loaded: u32, with_chunks: bool) -> Observation {
     let (mspt, tps) = tick_figures(host);
     let player_chunks = if with_chunks { player_chunks(host, players) } else { Vec::new() };
@@ -186,7 +188,7 @@ fn observation(host: &dyn ServerHost, players: &[PlayerRef], loaded: u32, with_c
         mspt,
         samples_ms: tick_samples_ms(host),
         loaded_chunks: loaded,
-        generated_total: 0,
+        generated_total: GENERATED.load(Ordering::Relaxed),
         free_memory_percent: crate::viewdistance_core::free_memory_percent(),
         tps: Some(tps),
         player_chunks,
@@ -334,16 +336,47 @@ fn check(host: &mut dyn ServerHost, base: Distances) {
 impl Hooks for Mod {
     fn permission_gather_nodes(&self, event: &mut PermissionGatherNodesEvent<'_>) {
         // The `/vdt` root node at `command-min-permission`, and the notice node at `notify-min-permission` (as the
-        // fallbacks were). The per-usage sub-nodes are not checked by the port, so they are not declared.
+        // fallbacks were), and the group nodes of `/vdt` (the original's `viewdistancetweaks.vdt.command.*`, default op).
         let (notify_level, command_level) = crate::viewdistance_core::permissions();
         let _ = event.nodes.add(
             perm_node("viewdistancetweaks.command.vdt"),
             NodeDefault::Level(PermissionLevel::from_level(i32::from(command_level))),
         );
+        for node in command::SUB_NODES {
+            let _ = event.nodes.add(
+                perm_node(node),
+                NodeDefault::Level(PermissionLevel::from_level(i32::from(command_level))),
+            );
+        }
         let _ = event.nodes.add(
             perm_node(command::NOTIFY_NODE),
             NodeDefault::Level(PermissionLevel::from_level(i32::from(notify_level.max(1)))),
         );
+    }
+
+    /// The original's tab completion: profile names, distance values, worlds and flags, after `/vdt`.
+    fn tab_complete(&self, _: &mut dyn ServerHost, event: &mut TabCompleteEvent<'_>) {
+        let line = event.command.trim_start_matches('/');
+        let mut words: Vec<&str> = line.split_whitespace().collect();
+        if !words.first().is_some_and(|w| w.eq_ignore_ascii_case("vdt")) {
+            return;
+        }
+        // The word being typed is the last one, empty after a trailing space.
+        if line.ends_with(char::is_whitespace) {
+            words.push("");
+        }
+        let profiles = crate::viewdistance_core::profile_names();
+        for text in command::complete(&words[1..], &profiles) {
+            if !event.suggestions.iter().any(|s| s.text == text) {
+                event.suggestions.push(Suggestion::new((event.range[0], event.range[1]), text));
+            }
+        }
+    }
+
+    fn chunk_load(&self, _: &mut dyn ServerHost, event: &mut ChunkLoadEvent<'_>) {
+        if event.new {
+            GENERATED.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     fn register_configs(&self, _: HostSide, event: &mut RegisterConfigsEvent<'_>) {
@@ -372,9 +405,9 @@ impl Hooks for Mod {
     }
 
     fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
-        // Bukkit gates all of /vdt with the one plugin.yml `permission:` `viewdistancetweaks.command.vdt`
-        // (default op); the sub-nodes are only declared there. So every usage is gated by the root node
-        // alone: a holder of it runs every sub-command, a holder of only a sub-node runs nothing.
+        // Bukkit gates all of /vdt with the plugin.yml `permission:` `viewdistancetweaks.command.vdt` (default
+        // op), so every usage is gated by the root node; `player_command` then asks the group node of the
+        // sub-command (`viewdistancetweaks.vdt.command.*`) and answers `&cNo permission.` as the original does.
         // The operator level decides when no permissions mod answers.
         let level = crate::viewdistance_core::permissions().1;
         for usage in command::USAGES.iter() {
@@ -393,6 +426,15 @@ impl Hooks for Mod {
         let level = crate::viewdistance_core::permissions().1;
         let allowed = host.player(event.player).is_some_and(|p| grants(&mut *host, p, "viewdistancetweaks.command.vdt", level));
         if allowed {
+            // The group node of the sub-command, on top of the root node (the original's `requirePermission`).
+            if let Some(node) = command::node_of(&event.command) {
+                let held = host.player(event.player).is_some_and(|p| grants(&mut *host, p, node, level));
+                if !held {
+                    event.replies.push(coloured(&*host, "&cNo permission."));
+                    event.cancelled = true;
+                    return Flow::Cancel;
+                }
+            }
             return Flow::Continue;
         }
         event.replies.push(Text::literal("\u{a7}cI'm sorry, but you do not have permission to perform this command. Please contact the server administrators if you believe that this is in error."));
@@ -431,9 +473,10 @@ impl Hooks for Mod {
                 Err(e) => lines.push(format!("&c{e}")),
             }
         }
-        if let (Some(d), Some(world)) = (reply.diagnose.as_ref(), host.world_dir()) {
+        if let Some(d) = reply.diagnose.as_ref() {
             let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-            crate::viewdistance_core::diagnose(d, &world.join("viewdistance").join("diagnostics"), unix);
+            let dir = host.world_dir().unwrap_or_default().join("viewdistance").join("diagnostics");
+            lines.extend(crate::viewdistance_core::diagnose(d, &dir, unix));
         }
         for line in lines {
             let text = coloured(&*host, &line);

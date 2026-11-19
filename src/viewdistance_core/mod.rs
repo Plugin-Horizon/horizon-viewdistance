@@ -1,5 +1,5 @@
 //! Adaptive view and simulation distance for a Horizon server, in the manner of the Paper plugin
-//! ViewDistanceTweaks (clean-room: its public documentation and config file only).
+//! ViewDistanceTweaks (a port of ViewDistanceTweaks 2.15.0, GPL-3.0, written with its source open).
 //!
 //! `engine` is the decision logic, `config` the settings. This file holds the one engine a server
 //! runs and what only the running system can say (free memory).
@@ -31,16 +31,45 @@ fn diag_state() -> std::sync::MutexGuard<'static, DiagState> {
     DIAG.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// `/vdt diagnose ...`: switch diagnostics or write a note into `dir` at `unix` seconds.
-pub fn diagnose(d: &command::Diagnose, dir: &std::path::Path, unix: u64) {
+/// What `/vdt diagnose ...` answers: whether diagnostics run, and while they do, today's file.
+pub fn diagnose_report(active: bool, file: &str, size_bytes: u64, entries: usize, interval_seconds: u64) -> Vec<String> {
+    let folder = command::DIAG_FOLDER;
+    if !active {
+        return vec![format!("&7Diagnostics are off. &f/vdt diagnose on &7starts recording to &f{folder}&7.")];
+    }
+    vec![
+        format!("&aDiagnostics are recording to &f{folder}&a, one file per day. &7/vdt diagnose off stops it."),
+        format!(
+            "&7Today: &f{file} &7({:.1} KB, {entries} entries since start), a sample every &f{interval_seconds}s&7.",
+            size_bytes as f64 / 1024.0
+        ),
+    ]
+}
+
+/// `/vdt diagnose ...`: switch diagnostics, write a note into `dir` at `unix` seconds (only while they run),
+/// or show the state. Returns the answer lines.
+pub fn diagnose(d: &command::Diagnose, dir: &std::path::Path, unix: u64) -> Vec<String> {
+    let (cfg_on, max, interval) = engine()
+        .as_ref()
+        .map_or((false, 50.0, 60), |e| (e.config().diagnostics, e.config().diag_max_file_mb, e.config().diag_interval_seconds));
     match d {
         command::Diagnose::On => diag_state().switched = Some(true),
         command::Diagnose::Off => diag_state().switched = Some(false),
-        command::Diagnose::Note(text) => {
-            let max = engine().as_ref().map_or(50.0, |e| e.config().diag_max_file_mb);
-            let _ = diag::append(dir, unix, &diag::note_line(unix, text), false, max);
-        }
+        command::Diagnose::Status | command::Diagnose::Note(_) => {}
     }
+    let active = diag_state().switched.unwrap_or(cfg_on);
+    if let command::Diagnose::Note(text) = d {
+        if !active {
+            return diagnose_report(false, "", 0, 0, interval);
+        }
+        let _ = diag::append(dir, unix, &diag::note_line(unix, text), false, max);
+        return vec!["&aNote saved.".into()];
+    }
+    let path = diag::file_for(dir, unix);
+    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let size = std::fs::metadata(&path).map_or(0, |m| m.len());
+    let entries = std::fs::read_to_string(&path).map_or(0, |t| t.lines().count());
+    diagnose_report(active, &name, size, entries, interval)
 }
 
 /// Once a tick: writes `change` and, every `interval-seconds` (or above
@@ -173,6 +202,11 @@ pub fn relief_active() -> bool {
     RELIEF.lock().unwrap_or_else(|e| e.into_inner()).active()
 }
 
+/// The profile names `/vdt profile` knows, "normal" first.
+pub fn profile_names() -> Vec<String> {
+    engine().as_ref().map_or_else(|| vec!["normal".to_owned()], |e| e.base_config().profile_names())
+}
+
 /// The active profile ("normal" when none).
 pub fn profile_name() -> String {
     engine().as_ref().map_or_else(|| "normal".to_owned(), |e| e.profile().to_owned())
@@ -223,6 +257,16 @@ mod tests {
         let (first, second, ticks) = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("load_config hung");
         assert!(first.is_empty() && second.is_empty());
         assert_eq!(ticks, Some(50));
+    }
+
+    #[test]
+    fn the_diagnose_answer_follows_the_state() {
+        assert_eq!(
+            diagnose_report(false, "", 0, 0, 60),
+            vec!["&7Diagnostics are off. &f/vdt diagnose on &7starts recording to &fviewdistance/diagnostics&7.".to_string()]
+        );
+        let on = diagnose_report(true, "2026-01-02.jsonl", 2048, 7, 60);
+        assert_eq!(on[1], "&7Today: &f2026-01-02.jsonl &7(2.0 KB, 7 entries since start), a sample every &f60s&7.");
     }
 
     #[test]

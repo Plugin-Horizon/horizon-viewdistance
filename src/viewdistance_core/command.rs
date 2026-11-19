@@ -6,9 +6,11 @@ use crate::viewdistance_core::engine::{std_dev, Distances, Engine, Observation};
 /// path, with literals for the fixed words and typed arguments for the rest. `--duration` and the
 /// `--fixed`/`--weight` flags are literal words (the flags in either order); a usage with a required
 /// argument after an optional one is refused by the server, so the optional world comes before it
-/// only where it is the last argument.
-pub const USAGES: [&str; 27] = [
-    "vdt",
+/// only where it is the last argument. The first usage takes any other word after `vdt` (the original
+/// answers an unknown sub-command with the help); distance values are words so a bad one reaches
+/// the original's "Invalid value" answer.
+pub const USAGES: &[&str] = &[
+    "vdt [rest:text]",
     "vdt help",
     "vdt reload",
     "vdt enable",
@@ -23,71 +25,56 @@ pub const USAGES: [&str; 27] = [
     "vdt mspt",
     "vdt mspt debug",
     "vdt profile [name:word]",
-    "vdt viewdistance <value:integer>",
-    "vdt viewdistance <value:integer> <world:word>",
-    "vdt viewdistance <value:integer> --duration <minutes:integer>",
-    "vdt viewdistance <value:integer> <world:word> --duration <minutes:integer>",
-    "vdt simulationdistance <value:integer>",
-    "vdt simulationdistance <value:integer> <world:word>",
-    "vdt simulationdistance <value:integer> --duration <minutes:integer>",
-    "vdt simulationdistance <value:integer> <world:word> --duration <minutes:integer>",
+    "vdt viewdistance",
+    "vdt viewdistance <value:word>",
+    "vdt viewdistance <value:word> <world:word>",
+    "vdt viewdistance <value:word> --duration <minutes:word>",
+    "vdt viewdistance <value:word> <world:word> --duration <minutes:word>",
+    "vdt simulationdistance",
+    "vdt simulationdistance <value:word>",
+    "vdt simulationdistance <value:word> <world:word>",
+    "vdt simulationdistance <value:word> --duration <minutes:word>",
+    "vdt simulationdistance <value:word> <world:word> --duration <minutes:word>",
     "vdt diagnose",
     "vdt diagnose on",
     "vdt diagnose off",
+    "vdt diagnose status",
+    "vdt diagnose note",
     "vdt diagnose note <text:text>",
 ];
 
-/// The permission node of each usage above, in the same order (the real plugin's nodes: one per
-/// sub-command group, `viewdistancetweaks.command.vdt` for the bare command and help). A server
-/// with a permissions mod can grant them; without one the operator level decides. Note: the host
-/// takes the node of the first usage with one for the whole `vdt` command (see GAPS.md).
-pub const NODES: [&str; 27] = [
-    "viewdistancetweaks.command.vdt",
-    "viewdistancetweaks.command.vdt",
+/// Every group node (declared with the others at gather time), with the root node first.
+pub const SUB_NODES: [&str; 8] = [
     "viewdistancetweaks.vdt.command.reload",
-    "viewdistancetweaks.vdt.command.reload",
-    "viewdistancetweaks.vdt.command.reload",
-    "viewdistancetweaks.vdt.command.status",
-    "viewdistancetweaks.vdt.command.status",
-    "viewdistancetweaks.vdt.command.status",
-    "viewdistancetweaks.vdt.command.status",
-    "viewdistancetweaks.vdt.command.status",
     "viewdistancetweaks.vdt.command.status",
     "viewdistancetweaks.vdt.command.simulate",
-    "viewdistancetweaks.vdt.command.status",
-    "viewdistancetweaks.vdt.command.status",
     "viewdistancetweaks.vdt.command.profile",
     "viewdistancetweaks.vdt.command.viewdistance",
-    "viewdistancetweaks.vdt.command.viewdistance",
-    "viewdistancetweaks.vdt.command.viewdistance",
-    "viewdistancetweaks.vdt.command.viewdistance",
     "viewdistancetweaks.vdt.command.simulationdistance",
-    "viewdistancetweaks.vdt.command.simulationdistance",
-    "viewdistancetweaks.vdt.command.simulationdistance",
-    "viewdistancetweaks.vdt.command.simulationdistance",
-    "viewdistancetweaks.vdt.command.reload",
-    "viewdistancetweaks.vdt.command.reload",
-    "viewdistancetweaks.vdt.command.reload",
-    "viewdistancetweaks.vdt.command.reload",
+    "viewdistancetweaks.vdt.command.preset",
+    "viewdistancetweaks.vdt.command.pregen",
 ];
 
-/// The permission node a `/vdt` line needs (without the slash; the node of the longest usage whose
-/// literal words it starts with); None when the line is not `/vdt`.
+/// The group node a `/vdt` line needs besides the root node (without the slash): the node of the
+/// sub-command word, as the original's `onCommand` switch maps it. None for the bare command, unknown
+/// words and help, which need the root node only; None when the line is not `/vdt`.
 pub fn node_of(line: &str) -> Option<&'static str> {
     let words: Vec<&str> = line.split_whitespace().collect();
     if !words.first()?.eq_ignore_ascii_case("vdt") {
         return None;
     }
-    let mut best: Option<(usize, &'static str)> = None;
-    for (usage, node) in USAGES.iter().zip(NODES) {
-        let tokens: Vec<&str> = usage.split_whitespace().collect();
-        let literal = tokens.iter().take_while(|t| !t.starts_with(['<', '['])).count();
-        let matches = literal <= words.len() && tokens[..literal].iter().zip(&words).all(|(a, b)| a.eq_ignore_ascii_case(b));
-        if matches && best.is_none_or(|(l, _)| literal > l) {
-            best = Some((literal, node));
-        }
-    }
-    best.map(|(_, node)| node)
+    let sub = words.get(1)?.to_ascii_lowercase();
+    Some(match sub.as_str() {
+        "reload" | "enable" | "disable" | "diagnose" | "update" => SUB_NODES[0],
+        "status" | "history" | "mspt" | "doctor" | "analyze" | "analyse" => SUB_NODES[1],
+        "simulate" => SUB_NODES[2],
+        "profile" => SUB_NODES[3],
+        "viewdistance" => SUB_NODES[4],
+        "simulationdistance" => SUB_NODES[5],
+        "preset" => SUB_NODES[6],
+        "pregen" => SUB_NODES[7],
+        _ => return None,
+    })
 }
 
 /// The permission node of the in-chat notices of distance changes.
@@ -95,6 +82,35 @@ pub const NOTIFY_NODE: &str = "viewdistancetweaks.notify";
 
 /// Where diagnostics are written, inside the world's folder (shown to operators).
 pub const DIAG_FOLDER: &str = "viewdistance/diagnostics";
+
+/// The completions for the word being typed: `args` are the words after `vdt`, the last one the
+/// (possibly empty) start of the word being typed; `profiles` the profile names, "normal" first. The
+/// original's `onTabComplete`, for the sub-commands this port has.
+pub fn complete(args: &[&str], profiles: &[String]) -> Vec<String> {
+    let start = |input: &str, options: &[&str]| -> Vec<String> {
+        options.iter().filter(|o| o.to_lowercase().starts_with(&input.to_lowercase())).map(|o| (*o).to_string()).collect()
+    };
+    let sub = args.first().map(|a| a.to_ascii_lowercase()).unwrap_or_default();
+    match (args.len(), sub.as_str()) {
+        (1, _) => start(
+            args[0],
+            &[
+                "reload", "status", "history", "diagnose", "simulate", "simulationdistance", "viewdistance", "enable", "disable",
+                "mspt", "profile",
+            ],
+        ),
+        (2, "profile") => {
+            let names: Vec<&str> = profiles.iter().map(String::as_str).collect();
+            start(args[1], &names)
+        }
+        (2, "simulationdistance" | "viewdistance") => start(args[1], &["2", "4", "6", "8", "10", "12", "16"]),
+        (3, "simulationdistance" | "viewdistance") => start(args[2], &["world", "--duration"]),
+        (2, "status") => start(args[1], &["--weight", "--fixed"]),
+        (2, "diagnose") => start(args[1], &["on", "off", "status", "note"]),
+        (2, "simulate") => start(args[1], &["world"]),
+        _ => Vec::new(),
+    }
+}
 
 /// What the game does after the lines are shown.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -110,6 +126,7 @@ pub struct Reply {
 pub enum Diagnose {
     On,
     Off,
+    Status,
     Note(String),
 }
 
@@ -130,7 +147,7 @@ fn tps(mspt: f64) -> f64 {
 }
 
 /// The help lines of messages.yml (`help:`), for the sub-commands this port has. The lines for
-/// analyze, doctor, preset, pregen and update are missing (see GAPS.md).
+/// analyze, doctor, preset, pregen and update are left out: those commands are not ported (see HMOD_PORT.md).
 pub fn help() -> Vec<String> {
     [
         "&6--- VDT Commands ---",
@@ -138,7 +155,7 @@ pub fn help() -> Vec<String> {
         "&e/vdt status [--weight|--fixed]           &7- Show status",
         "&e/vdt simulate [world]                    &7- Preview next check without applying it",
         "&e/vdt history                             &7- Show recent distance changes",
-        "&e/vdt diagnose [on|off|note <text>] &7- Record what the plugin sees to a log file",
+        "&e/vdt diagnose [on|off|status|note <text>] &7- Record what the plugin sees to a log file",
         "&e/vdt simulationdistance <value> [world] [--duration <min>]",
         "&e/vdt viewdistance <value> [world] [--duration <min>]",
         "&e/vdt enable / disable                    &7- Toggle the plugin",
@@ -182,15 +199,11 @@ pub fn run(e: &mut Engine, line: &str, actual: Distances, o: &Observation) -> Op
                 Some("off") => Diagnose::Off,
                 Some("note") if rest.len() > 1 => Diagnose::Note(rest[1..].join(" ")),
                 Some("note") => return reply(vec!["&cUsage: /vdt diagnose note <text>".into()]),
-                _ => return reply(vec!["&cUsage: /vdt diagnose [on|off|note <text>]".into()]),
+                // Anything else (none, "status") shows the state, as the original does.
+                _ => Diagnose::Status,
             };
-            let line = match &d {
-                Diagnose::On => "&aDiagnostics are recording to &f{folder}&a, one file per day. &7/vdt diagnose off stops it.",
-                Diagnose::Off => "&7Diagnostics are off. &f/vdt diagnose on &7starts recording to &f{folder}&7.",
-                Diagnose::Note(_) => "&aNote saved.",
-            }
-            .replace("{folder}", DIAG_FOLDER);
-            Some(Reply { lines: vec![line.into()], diagnose: Some(d), ..Reply::default() })
+            // The answer depends on whether diagnostics run, which only the caller knows (`diagnose`).
+            Some(Reply { diagnose: Some(d), ..Reply::default() })
         }
         _ => reply(help()),
     }
@@ -199,28 +212,33 @@ pub fn run(e: &mut Engine, line: &str, actual: Distances, o: &Observation) -> Op
 fn status(e: &Engine, d: Distances, o: &Observation, fixed: bool, weight: bool) -> Vec<String> {
     let c = e.config();
     if fixed {
-        let throttled = e.throttled();
+        let mut lines = vec!["&6=== Active per-player overrides ===".to_string()];
         if !c.afk && !c.ping && !c.fixed_view && !c.fixed_sim {
-            return vec![
+            lines.push(
                 "&7No per-player distance feature is enabled in config.yml &8(per-player-fixed-view-distance, \
                  per-player-fixed-simulation-distance, afk-player-throttling, ping-throttling)."
                     .into(),
-            ];
+            );
+            return lines;
         }
-        let mut lines = vec!["&6=== Active per-player overrides ===".to_string()];
+        let throttled = e.throttled();
         if throttled.is_empty() {
             lines.push("&7No player currently has a fixed view or simulation distance.".into());
         }
         for (id, p, by) in throttled {
             let source = match by {
                 "PING" => "&b[PING]",
-                "FIXED" => "&d[FIXED]",
+                "FIXED" => "&8[permission]",
                 _ => "&6[AFK]",
             };
             lines.push(format!("&e{id:032x} &7in &fworld"));
             lines.push(format!("  &7View: &a{} &8(world: {}) {source}", p.view, d.view));
             lines.push(format!("  &7Sim:  &a{} &8(world: {}) {source}", p.sim, d.sim));
         }
+        lines.push(format!(
+            "&8Grant &7{}<2-32> &8or &7{}<2-32>&8; highest value wins.",
+            c.fixed_view_prefix, c.fixed_sim_prefix
+        ));
         return lines;
     }
     let mode = format!("{:?}", c.mode).to_ascii_lowercase();
@@ -228,7 +246,9 @@ fn status(e: &Engine, d: Distances, o: &Observation, fixed: bool, weight: bool) 
         "&6=== ViewDistanceTweaks Status ===".to_string(),
         format!("&7Mode: &f{mode} &7| MSPT: &f{} &7| TPS: &f{} &7| Active: &f{}", f2(o.mspt), f2(o.tps.unwrap_or_else(|| tps(o.mspt))), e.active()),
     ];
-    if o.samples_ms.len() >= c.variance_min_samples {
+    if !c.variance {
+        // The original shows no variance line while `mspt-variance` is off.
+    } else if o.samples_ms.len() >= c.variance_min_samples {
         let sd = std_dev(&o.samples_ms);
         // Same three tiers as the original (status.variance): red above the threshold, yellow above
         // 60% of it, green otherwise; the warning only when it is above the threshold.
@@ -306,8 +326,10 @@ fn mspt(e: &Engine, o: &Observation, debug: bool) -> Vec<String> {
     let mut lines = vec![
         format!("&7MSPT (avg): &f{}", f2(o.mspt)),
         format!("&7TPS:        &f{}", f2(o.tps.unwrap_or_else(|| tps(o.mspt)))),
-        format!("&7MSPT stddev: &f{} &7(threshold: &f{}&7)", f2(std_dev(s)), f2(e.config().variance_threshold)),
     ];
+    if e.config().variance {
+        lines.push(format!("&7MSPT stddev: &f{} &7(threshold: &f{:.1}&7)", f2(std_dev(s)), e.config().variance_threshold));
+    }
     if debug {
         lines.push(format!("&7Samples: &f{} &7(source: the server's tick times)", s.len()));
         if !s.is_empty() {
@@ -399,11 +421,13 @@ fn pin(e: &mut Engine, sim: bool, args: &[&str], cur: Distances) -> Vec<String> 
     } else {
         "&cUsage: /vdt viewdistance <value> [world] [--duration <min>]"
     };
-    let Some(Ok(value)) = args.first().map(|v| v.parse::<i32>()) else {
+    let Some(raw) = args.first() else {
         return vec![usage.into()];
     };
+    // Not a number counts as -1, so it is out of range, and the answer shows the raw text.
+    let value = raw.parse::<i32>().unwrap_or(-1);
     if !(2..=32).contains(&value) {
-        return vec![format!("&cInvalid value: &f{value}&c. Must be between &f2&c and &f32&c.")];
+        return vec![format!("&cInvalid value: &f{raw}&c. Must be between &f2&c and &f32&c.")];
     }
     // The original's parseInt(..., 0): a duration that is not a positive number means "permanent".
     let minutes = args
@@ -464,14 +488,31 @@ mod tests {
 
     #[test]
     fn every_sub_command_is_checked_against_its_own_node() {
-        assert_eq!(node_of("vdt"), Some("viewdistancetweaks.command.vdt"));
+        assert_eq!(node_of("vdt"), None);
+        assert_eq!(node_of("vdt foo"), None);
         assert_eq!(node_of("vdt reload"), Some("viewdistancetweaks.vdt.command.reload"));
+        assert_eq!(node_of("vdt diagnose on"), Some("viewdistancetweaks.vdt.command.reload"));
+        assert_eq!(node_of("vdt mspt debug"), Some("viewdistancetweaks.vdt.command.status"));
+        assert_eq!(node_of("vdt history"), Some("viewdistancetweaks.vdt.command.status"));
         assert_eq!(node_of("vdt status --weight"), Some("viewdistancetweaks.vdt.command.status"));
         assert_eq!(node_of("VDT profile night-mode"), Some("viewdistancetweaks.vdt.command.profile"));
         assert_eq!(node_of("vdt viewdistance 10"), Some("viewdistancetweaks.vdt.command.viewdistance"));
-        assert_eq!(node_of("vdt simulationdistance reset"), Some("viewdistancetweaks.vdt.command.simulationdistance"));
+        assert_eq!(node_of("vdt simulationdistance 8"), Some("viewdistancetweaks.vdt.command.simulationdistance"));
         assert_eq!(node_of("tpa Steve"), None);
         assert_eq!(node_of(""), None);
+    }
+
+    #[test]
+    fn completion_follows_the_originals_lists() {
+        let profiles: Vec<String> = ["normal", "event-mode"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(complete(&["s"], &profiles), ["status", "simulate", "simulationdistance"]);
+        assert_eq!(complete(&["profile", "e"], &profiles), ["event-mode"]);
+        assert_eq!(complete(&["profile", ""], &profiles), ["normal", "event-mode"]);
+        assert_eq!(complete(&["viewdistance", "1"], &profiles), ["10", "12", "16"]);
+        assert_eq!(complete(&["viewdistance", "8", ""], &profiles), ["world", "--duration"]);
+        assert_eq!(complete(&["diagnose", "s"], &profiles), ["status"]);
+        assert_eq!(complete(&["status", "--"], &profiles), ["--weight", "--fixed"]);
+        assert!(complete(&["reload", ""], &profiles).is_empty());
     }
 
     #[test]
@@ -521,7 +562,14 @@ mod tests {
         let r = run(&mut e, "vdt viewdistance 4", D, &obs()).unwrap();
         assert_eq!(r.lines.len(), 2);
         assert_eq!(r.lines[1], "&aView distance set (permanent until reload).");
-        assert!(run(&mut e, "vdt viewdistance x", D, &obs()).unwrap().lines[0].starts_with("&cUsage"));
+        assert_eq!(
+            run(&mut e, "vdt viewdistance x", D, &obs()).unwrap().lines,
+            vec!["&cInvalid value: &fx&c. Must be between &f2&c and &f32&c.".to_string()]
+        );
+        assert_eq!(
+            run(&mut e, "vdt viewdistance", D, &obs()).unwrap().lines,
+            vec!["&cUsage: /vdt viewdistance <value> [world] [--duration <min>]".to_string()]
+        );
         // A duration that is not a positive number means permanent, as in the original.
         let r = run(&mut e, "vdt viewdistance 8 --duration", D, &obs()).unwrap();
         assert_eq!(r.lines, vec!["&aView distance set (permanent until reload).".to_string()]);
@@ -580,6 +628,12 @@ mod tests {
         assert_eq!(lines.len(), 5);
         let r = run(&mut e, "vdt diagnose note lag at spawn", D, &obs()).unwrap();
         assert_eq!(r.diagnose, Some(Diagnose::Note("lag at spawn".into())));
+        assert_eq!(run(&mut e, "vdt diagnose", D, &obs()).unwrap().diagnose, Some(Diagnose::Status));
+        assert_eq!(run(&mut e, "vdt diagnose status", D, &obs()).unwrap().diagnose, Some(Diagnose::Status));
+        assert_eq!(
+            run(&mut e, "vdt diagnose note", D, &obs()).unwrap().lines,
+            vec!["&cUsage: /vdt diagnose note <text>".to_string()]
+        );
         assert_eq!(run(&mut e, "vdt diagnose on", D, &obs()).unwrap().diagnose, Some(Diagnose::On));
     }
 }
