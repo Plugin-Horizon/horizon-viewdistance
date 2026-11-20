@@ -252,17 +252,26 @@ fn status(e: &Engine, d: Distances, o: &Observation, fixed: bool, weight: bool) 
         }
         for (id, p, by) in throttled {
             let source = match by {
-                "PING" => "&b[PING]",
-                "FIXED" => "&8[permission]",
-                _ => "&6[AFK]",
+                "PING" => t("status.fixed.source-ping", "&b[PING]", &[]),
+                "FIXED" => t("status.fixed.source-permission", "&8[permission]", &[]),
+                _ => t("status.fixed.source-afk", "&6[AFK]", &[]),
             };
-            lines.push(format!("&e{id:032x} &7in &fworld"));
-            lines.push(format!("  &7View: &a{} &8(world: {}) {source}", p.view, d.view));
-            lines.push(format!("  &7Sim:  &a{} &8(world: {}) {source}", p.sim, d.sim));
+            lines.push(t("status.fixed.entry", "&e{player} &7in &f{world}", &[("player", format!("{id:032x}")), ("world", "world".to_owned())]));
+            lines.push(t(
+                "status.fixed.view",
+                "  &7View: &a{value} &8(world: {worldValue}) {source}",
+                &[("value", p.view.to_string()), ("worldValue", d.view.to_string()), ("source", source.clone())],
+            ));
+            lines.push(t(
+                "status.fixed.sim",
+                "  &7Sim:  &a{value} &8(world: {worldValue}) {source}",
+                &[("value", p.sim.to_string()), ("worldValue", d.sim.to_string()), ("source", source)],
+            ));
         }
-        lines.push(format!(
-            "&8Grant &7{}<2-32> &8or &7{}<2-32>&8; highest value wins.",
-            c.fixed_view_prefix, c.fixed_sim_prefix
+        lines.push(t(
+            "status.fixed.hint",
+            "&8Grant &7{viewPrefix}<2-32> &8or &7{simPrefix}<2-32>&8; highest value wins.",
+            &[("viewPrefix", c.fixed_view_prefix.to_string()), ("simPrefix", c.fixed_sim_prefix.to_string())],
         ));
         return lines;
     }
@@ -819,6 +828,14 @@ mod tests {
         assert!(!lines[3].contains("Weight"), "{lines:?}");
         // The profile line is shown only while a profile other than "normal" is active.
         assert!(!lines.iter().any(|l| l.starts_with("&7Active profile")), "{lines:?}");
+    }
+
+    #[test]
+    fn status_fixed_with_every_feature_off_gives_header_and_reason() {
+        let lines = run(&mut engine(), "vdt status --fixed", D, &obs()).unwrap().lines;
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines[0], "&6=== Active per-player overrides ===");
+        assert!(lines[1].starts_with("&7No per-player distance feature is enabled in config.yml"), "{lines:?}");
     }
 
     #[test]
