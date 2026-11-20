@@ -7,6 +7,7 @@ pub mod command;
 pub mod config;
 pub mod diag;
 pub mod engine;
+pub mod messages;
 pub mod relief;
 
 pub use command::Reply;

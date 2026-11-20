@@ -1,6 +1,7 @@
 //! `/vdt`: the answers, as `&`-coded lines. The texts are the original's English defaults; the
 //! server's one world is called "world".
 use crate::viewdistance_core::engine::{std_dev, Distances, Engine, Observation};
+use crate::viewdistance_core::messages::t;
 
 /// The usages registered with the server (completion and operator level): one per real sub-command
 /// path, with literals for the fixed words and typed arguments for the rest. `--duration` and the
@@ -41,6 +42,11 @@ pub const USAGES: &[&str] = &[
     "vdt diagnose status",
     "vdt diagnose note",
     "vdt diagnose note <text:text>",
+    "vdt analyze",
+    "vdt analyse",
+    "vdt doctor",
+    "vdt preset",
+    "vdt preset <name:word>",
 ];
 
 /// Every group node (declared with the others at gather time), with the root node first.
@@ -95,10 +101,11 @@ pub fn complete(args: &[&str], profiles: &[String]) -> Vec<String> {
         (1, _) => start(
             args[0],
             &[
-                "reload", "status", "history", "diagnose", "simulate", "simulationdistance", "viewdistance", "enable", "disable",
-                "mspt", "profile",
+                "reload", "status", "history", "analyze", "doctor", "diagnose", "simulate", "simulationdistance", "viewdistance",
+                "enable", "disable", "mspt", "preset", "profile",
             ],
         ),
+        (2, "preset") => start(args[1], PRESET_NAMES),
         (2, "profile") => {
             let names: Vec<&str> = profiles.iter().map(String::as_str).collect();
             start(args[1], &names)
@@ -131,6 +138,8 @@ pub enum Diagnose {
 }
 
 fn reply(lines: Vec<String>) -> Option<Reply> {
+    let prefix = crate::viewdistance_core::messages::prefix();
+    let lines = if prefix.is_empty() { lines } else { lines.into_iter().map(|l| format!("{prefix}{l}")).collect() };
     Some(Reply { lines, ..Reply::default() })
 }
 
@@ -147,7 +156,7 @@ fn tps(mspt: f64) -> f64 {
 }
 
 /// The help lines of messages.yml (`help:`), for the sub-commands this port has. The lines for
-/// analyze, doctor, preset, pregen and update are left out: those commands are not ported (see HMOD_PORT.md).
+/// pregen and update are left out: those commands are not ported (see HMOD_PORT.md).
 pub fn help() -> Vec<String> {
     [
         "&6--- VDT Commands ---",
@@ -155,11 +164,14 @@ pub fn help() -> Vec<String> {
         "&e/vdt status [--weight|--fixed]           &7- Show status",
         "&e/vdt simulate [world]                    &7- Preview next check without applying it",
         "&e/vdt history                             &7- Show recent distance changes",
+        "&e/vdt analyze                             &7- Suggestions from this server's own history",
+        "&e/vdt doctor                              &7- Check setup, conflicts and updates in one go",
         "&e/vdt diagnose [on|off|status|note <text>] &7- Record what the plugin sees to a log file",
         "&e/vdt simulationdistance <value> [world] [--duration <min>]",
         "&e/vdt viewdistance <value> [world] [--duration <min>]",
         "&e/vdt enable / disable                    &7- Toggle the plugin",
         "&e/vdt mspt                                &7- Show MSPT, TPS & variance",
+        "&e/vdt preset <small-server|large-network|performance-first>",
         "&e/vdt profile [name]                      &7- Show or switch the active profile",
     ]
     .iter()
@@ -181,24 +193,29 @@ pub fn run(e: &mut Engine, line: &str, actual: Distances, o: &Observation) -> Op
         Some("reload") => Some(Reply { reload: true, ..Reply::default() }),
         Some("enable") => {
             e.switch(true);
-            reply(vec!["&aPlugin enabled.".into()])
+            reply(vec![t("enabled", "&aPlugin enabled.", &[])])
         }
         Some("disable") => {
             e.switch(false);
-            reply(vec!["&cPlugin disabled.".into()])
+            reply(vec![t("disabled", "&cPlugin disabled.", &[])])
         }
         Some("status") => reply(status(e, actual, o, rest.contains(&"--fixed"), rest.contains(&"--weight"))),
         Some("mspt") => reply(mspt(e, o, rest.first() == Some(&"debug"))),
         Some("history") => reply(history(e)),
         Some("simulate") => reply(simulate(e, actual, o, rest.first().copied())),
         Some("profile") => reply(profile(e, rest.first().copied())),
+        Some("preset") => reply(preset(e, rest.first().copied())),
+        Some("pregen") => reply(vec!["&cPre-generation is not available on this server: Horizon has no chunk-generation API yet.".into()]),
+        Some("update") => reply(vec!["&7Update checks are not part of this port; the mod is updated with the server.".into()]),
+        Some("analyze" | "analyse") => reply(analyze(e, o)),
+        Some("doctor") => reply(doctor(e, o)),
         Some(which @ ("viewdistance" | "simulationdistance")) => reply(pin(e, which == "simulationdistance", &rest, actual)),
         Some("diagnose") => {
             let d = match rest.first().map(|w| w.to_ascii_lowercase()).as_deref() {
                 Some("on") => Diagnose::On,
                 Some("off") => Diagnose::Off,
                 Some("note") if rest.len() > 1 => Diagnose::Note(rest[1..].join(" ")),
-                Some("note") => return reply(vec!["&cUsage: /vdt diagnose note <text>".into()]),
+                Some("note") => return reply(vec![t("diagnose.note-usage", "&cUsage: /vdt diagnose note <text>", &[])]),
                 // Anything else (none, "status") shows the state, as the original does.
                 _ => Diagnose::Status,
             };
@@ -212,7 +229,7 @@ pub fn run(e: &mut Engine, line: &str, actual: Distances, o: &Observation) -> Op
 fn status(e: &Engine, d: Distances, o: &Observation, fixed: bool, weight: bool) -> Vec<String> {
     let c = e.config();
     if fixed {
-        let mut lines = vec!["&6=== Active per-player overrides ===".to_string()];
+        let mut lines = vec![t("status.fixed.header", "&6=== Active per-player overrides ===", &[])];
         if !c.afk && !c.ping && !c.fixed_view && !c.fixed_sim {
             lines.push(
                 "&7No per-player distance feature is enabled in config.yml &8(per-player-fixed-view-distance, \
@@ -223,7 +240,7 @@ fn status(e: &Engine, d: Distances, o: &Observation, fixed: bool, weight: bool) 
         }
         let throttled = e.throttled();
         if throttled.is_empty() {
-            lines.push("&7No player currently has a fixed view or simulation distance.".into());
+            lines.push(t("status.fixed.none", "&7No player currently has a fixed view or simulation distance.", &[]));
         }
         for (id, p, by) in throttled {
             let source = match by {
@@ -243,8 +260,8 @@ fn status(e: &Engine, d: Distances, o: &Observation, fixed: bool, weight: bool) 
     }
     let mode = format!("{:?}", c.mode).to_ascii_lowercase();
     let mut lines = vec![
-        "&6=== ViewDistanceTweaks Status ===".to_string(),
-        format!("&7Mode: &f{mode} &7| MSPT: &f{} &7| TPS: &f{} &7| Active: &f{}", f2(o.mspt), f2(o.tps.unwrap_or_else(|| tps(o.mspt))), e.active()),
+        t("status.header", "&6=== ViewDistanceTweaks Status ===", &[]),
+        t("status.summary", "&7Mode: &f{mode} &7| MSPT: &f{mspt} &7| TPS: &f{tps} &7| Active: &f{active}", &[("mode", mode), ("mspt", f2(o.mspt)), ("tps", f2(o.tps.unwrap_or_else(|| tps(o.mspt)))), ("active", e.active().to_string())]),
     ];
     if !c.variance {
         // The original shows no variance line while `mspt-variance` is off.
@@ -265,7 +282,7 @@ fn status(e: &Engine, d: Distances, o: &Observation, fixed: bool, weight: bool) 
             f2(c.variance_threshold)
         ));
     } else {
-        lines.push("&7MSPT variance: &8not enough samples yet".into());
+        lines.push(t("status.variance-no-samples", "&7MSPT variance: &8not enough samples yet", &[]));
     }
     if let Some(left) = e.grace_left() {
         lines.push(format!(
@@ -291,7 +308,7 @@ fn status(e: &Engine, d: Distances, o: &Observation, fixed: bool, weight: bool) 
     lines.push(world);
     // The original shows the profile line only while a profile other than "normal" is active.
     if e.profile() != "normal" {
-        lines.push(format!("&7Active profile: &b{}", e.profile()));
+        lines.push(t("status.profile", "&7Active profile: &b{profile}", &[("profile", e.profile().to_string())]));
     }
     if let Some(free) = o.free_memory_percent.filter(|_| c.memory_safeguard) {
         let low = free < c.memory_min_free_percent;
@@ -359,19 +376,16 @@ fn ago(ticks: u64) -> String {
 fn history(e: &Engine) -> Vec<String> {
     let entries: Vec<_> = e.history().collect();
     if entries.is_empty() {
-        return vec!["&7No distance changes recorded yet since the last restart.".into()];
+        return vec![t("history.empty", "&7No distance changes recorded yet since the last restart.", &[])];
     }
-    let mut lines = vec![format!("&6=== Last {} distance changes ===", entries.len())];
+    let mut lines = vec![t("history.header", "&6=== Last {count} distance changes ===", &[("count", entries.len().to_string())])];
     for (tick, c) in entries.into_iter().rev() {
-        lines.push(format!(
-            "&8{} &eworld &7Sim: &f{}&7\u{2192}&a{} &7View: &f{}&7\u{2192}&a{}",
-            ago(e.ticks() - tick),
-            c.from.sim,
-            c.to.sim,
-            c.from.view,
-            c.to.view
+        lines.push(t(
+            "history.entry",
+            "&8{ago} &e{world} &7Sim: &f{oldSim}&7\u{2192}&a{newSim} &7View: &f{oldView}&7\u{2192}&a{newView}",
+            &[("ago", ago(e.ticks() - tick)), ("world", "world".into()), ("oldSim", c.from.sim.to_string()), ("newSim", c.to.sim.to_string()), ("oldView", c.from.view.to_string()), ("newView", c.to.view.to_string())],
         ));
-        lines.push(format!("  &8{}", c.reason));
+        lines.push(t("history.reason", "  &8{reason}", &[("reason", c.reason.to_string())]));
     }
     lines
 }
@@ -379,55 +393,54 @@ fn history(e: &Engine) -> Vec<String> {
 fn simulate(e: &Engine, cur: Distances, o: &Observation, world: Option<&str>) -> Vec<String> {
     // The original checks "enabled" before the world name, so a disabled plugin answers first.
     if !e.active() {
-        return vec!["&cPlugin is disabled - enable it first (/vdt enable) to simulate a check.".into()];
+        return vec![t("simulate.disabled", "&cPlugin is disabled - enable it first (/vdt enable) to simulate a check.", &[])];
     }
     // The server's one world is called "world" (see the module comment).
     if let Some(w) = world.filter(|w| *w != "world") {
-        return vec![format!("&cWorld not found: {w}")];
+        return vec![t("world-not-found", "&cWorld not found: {world}", &[("world", (*w).to_string())])];
     }
     let (to, reason, now) = e.simulate(cur, o);
     // Original colouring (simulate.entry): the arrow is green when the next check would apply and
     // grey when not; the new values are yellow when anything changes and grey when nothing does.
     let arrow = if now { "&a\u{2192}" } else { "&8\u{2192}" };
     let colour = if to == cur { "&7" } else { "&e" };
+    let verdict = if now && to != cur { t("simulate.would-apply", " &a[would apply]", &[]) } else { t("simulate.would-not-apply", " &8[not yet / no change]", &[]) };
     vec![
-        format!("&6=== /vdt simulate {} ===", world.unwrap_or("(all worlds)")),
-        "&7This shows what the NEXT check would compute. Nothing is applied.".into(),
-        format!("&7Current MSPT: &f{} &7| stddev: &f{}", f2(o.mspt), f2(std_dev(&o.samples_ms))),
-        format!(
-            "&eworld &7| Sim: &f{} {arrow} {colour}{} &7| View: &f{} {arrow} {colour}{}",
-            cur.sim, to.sim, cur.view, to.view
+        t("simulate.header", "&6=== /vdt simulate {world} ===", &[("world", world.unwrap_or("(all worlds)").to_string())]),
+        t("simulate.note", "&7This shows what the NEXT check would compute. Nothing is applied.", &[]),
+        t("simulate.mspt", "&7Current MSPT: &f{mspt} &7| stddev: &f{stddev}", &[("mspt", f2(o.mspt)), ("stddev", f2(std_dev(&o.samples_ms)))]),
+        t(
+            "simulate.entry",
+            "&e{world} &7| Sim: &f{currentSim} {arrow} {color}{targetSim} &7| View: &f{currentView} {arrow} {color}{targetView}",
+            &[("world", "world".into()), ("currentSim", cur.sim.to_string()), ("arrow", arrow.to_string()), ("color", colour.to_string()), ("targetSim", to.sim.to_string()), ("currentView", cur.view.to_string()), ("targetView", to.view.to_string())],
         ),
-        format!(
-            "  &8{reason}{}",
-            if now && to != cur { " &a[would apply]" } else { " &8[not yet / no change]" }
-        ),
+        t("simulate.reason", "  &8{reason}{verdict}", &[("reason", reason.to_string()), ("verdict", verdict)]),
     ]
 }
 
 fn profile(e: &mut Engine, name: Option<&str>) -> Vec<String> {
     let names = e.base_config().profile_names().join(", ");
     match name {
-        None => vec![format!("&7Active profile: &b{}", e.profile()), format!("&7Available: &f{names}")],
-        Some(n) if e.set_profile(n) => vec![format!("&aSwitched to profile &f{}&a.", e.profile())],
-        Some(n) => vec![format!("&cUnknown profile: {n} &7(available: {names})")],
+        None => vec![t("profile.current", "&7Active profile: &b{profile}", &[("profile", e.profile().to_string())]), t("profile.available", "&7Available: &f{profiles}", &[("profiles", names)])],
+        Some(n) if e.set_profile(n) => vec![t("profile.applied", "&aSwitched to profile &f{profile}&a.", &[("profile", e.profile().to_string())])],
+        Some(n) => vec![t("profile.unknown", "&cUnknown profile: {profile} &7(available: {profiles})", &[("profile", n.to_string()), ("profiles", names)])],
     }
 }
 
 /// `/vdt viewdistance|simulationdistance <value> [world] [--duration <min>]`.
 fn pin(e: &mut Engine, sim: bool, args: &[&str], cur: Distances) -> Vec<String> {
     let usage = if sim {
-        "&cUsage: /vdt simulationdistance <value> [world] [--duration <min>]"
+        t("override.usage-sim", "&cUsage: /vdt simulationdistance <value> [world] [--duration <min>]", &[])
     } else {
-        "&cUsage: /vdt viewdistance <value> [world] [--duration <min>]"
+        t("override.usage-view", "&cUsage: /vdt viewdistance <value> [world] [--duration <min>]", &[])
     };
     let Some(raw) = args.first() else {
-        return vec![usage.into()];
+        return vec![usage];
     };
     // Not a number counts as -1, so it is out of range, and the answer shows the raw text.
     let value = raw.parse::<i32>().unwrap_or(-1);
     if !(2..=32).contains(&value) {
-        return vec![format!("&cInvalid value: &f{raw}&c. Must be between &f2&c and &f32&c.")];
+        return vec![t("invalid-range", "&cInvalid value: &f{value}&c. Must be between &f{min}&c and &f{max}&c.", &[("value", (*raw).to_string()), ("min", "2".into()), ("max", "32".into())])];
     }
     // The original's parseInt(..., 0): a duration that is not a positive number means "permanent".
     let minutes = args
@@ -438,14 +451,15 @@ fn pin(e: &mut Engine, sim: bool, args: &[&str], cur: Distances) -> Vec<String> 
         .filter(|m| *m > 0);
     // The optional world (second word, unless it is a flag). The one world is called "world".
     if let Some(w) = args.get(1).filter(|w| !w.starts_with("--")).filter(|w| **w != "world") {
-        return vec![format!("&cWorld not found: {w}")];
+        return vec![t("world-not-found", "&cWorld not found: {world}", &[("world", (*w).to_string())])];
     }
     let mut lines = Vec::new();
     let mut value = value;
     if !sim && value < cur.sim {
-        lines.push(format!(
-            "&eworld: requested view distance {value} is below simulation distance {} - using {} instead (view must be >= sim).",
-            cur.sim, cur.sim
+        lines.push(t(
+            "override.view-below-sim",
+            "&e{world}: requested view distance {view} is below simulation distance {sim} - using {sim} instead (view must be >= sim).",
+            &[("world", "world".into()), ("view", value.to_string()), ("sim", cur.sim.to_string())],
         ));
         value = cur.sim;
     }
@@ -453,9 +467,10 @@ fn pin(e: &mut Engine, sim: bool, args: &[&str], cur: Distances) -> Vec<String> 
     // as the original does when it applies the pair.
     let mut view_pin = None;
     if sim && cur.view < value {
-        lines.push(format!(
-            "&eworld: requested view distance {} is below simulation distance {value} - using {value} instead (view must be >= sim).",
-            cur.view
+        lines.push(t(
+            "override.view-below-sim",
+            "&e{world}: requested view distance {view} is below simulation distance {sim} - using {sim} instead (view must be >= sim).",
+            &[("world", "world".into()), ("view", cur.view.to_string()), ("sim", value.to_string())],
         ));
         view_pin = Some(value);
     }
@@ -463,10 +478,251 @@ fn pin(e: &mut Engine, sim: bool, args: &[&str], cur: Distances) -> Vec<String> 
     if let Some(view) = view_pin {
         e.pin(false, view, minutes);
     }
-    let label = if sim { "Simulation distance" } else { "View distance" };
+    let label = if sim { t("override.label-sim", "Simulation distance", &[]) } else { t("override.label-view", "View distance", &[]) };
     lines.push(match minutes {
-        Some(m) => format!("&a{label} set for {m} min."),
-        None => format!("&a{label} set (permanent until reload)."),
+        Some(m) => t("override.applied-temporary", "&a{label} set for {minutes} min.", &[("label", label), ("minutes", m.to_string())]),
+        None => t("override.applied-permanent", "&a{label} set (permanent until reload).", &[("label", label)]),
+    });
+    lines
+}
+
+/// The preset names (`ConfigPresets.PRESETS`).
+pub const PRESET_NAMES: &[&str] = &["small-server", "large-network", "performance-first"];
+
+/// `ConfigPresets`: the values each preset sets, applied to the config in force. Returns how many values the original's
+/// preset holds (its `size()`), which is what the answer reports.
+fn apply_preset(c: &mut crate::viewdistance_core::config::Config, name: &str) -> Option<usize> {
+    use crate::viewdistance_core::config::Mode;
+    match name {
+        "small-server" => {
+            c.mode = Mode::Mixed;
+            c.increase_mspt = 35.0;
+            c.decrease_mspt = 45.0;
+            c.ticking_target = 8000.0;
+            c.non_ticking_target = 9000.0;
+            c.max_sim = 12;
+            c.max_view = 20;
+            Some(8)
+        }
+        "large-network" => {
+            c.mode = Mode::Mixed;
+            c.increase_mspt = 38.0;
+            c.decrease_mspt = 44.0;
+            c.max_decrease_step = 2;
+            c.prioritize_simulation = true;
+            c.ticking_target = 4000.0;
+            c.non_ticking_target = 5000.0;
+            c.max_sim = 8;
+            c.max_view = 12;
+            Some(9)
+        }
+        "performance-first" => {
+            c.mode = Mode::Reactive;
+            c.increase_mspt = 35.0;
+            c.decrease_mspt = 42.0;
+            c.max_decrease_step = 3;
+            c.prioritize_simulation = true;
+            c.variance_threshold = 6.0;
+            c.max_sim = 6;
+            c.max_view = 8;
+            Some(8)
+        }
+        _ => None,
+    }
+}
+
+/// `/vdt preset <name>`. The original rewrites config.yml; this port changes the settings in force, and they hold
+/// until the next `/vdt reload` (the config file is the server's own and is not rewritten).
+fn preset(e: &mut Engine, name: Option<&str>) -> Vec<String> {
+    let all = PRESET_NAMES.join(", ");
+    let Some(name) = name else {
+        return vec![t("preset.usage", "&cUsage: /vdt preset <{presets}>", &[("presets", PRESET_NAMES.join("|"))])];
+    };
+    let lower = name.to_ascii_lowercase();
+    let mut cfg = e.base_config().clone();
+    let Some(count) = apply_preset(&mut cfg, &lower) else {
+        return vec![t("preset.unknown", "&cUnknown preset: {preset} &7(available: {presets})", &[("preset", name.to_string()), ("presets", all)])];
+    };
+    e.set_config(cfg);
+    vec![t("preset.applied", "&aApplied preset &f{preset}&a ({count} values changed). Config reloaded - fine-tune further as needed.", &[("preset", lower), ("count", count.to_string())])]
+}
+
+/// One `/vdt analyze` finding: severity (`problem`, `suggestion`, `fine`), option (`-` for none), suggestion, because.
+struct Finding {
+    severity: &'static str,
+    option: &'static str,
+    suggestion: String,
+    because: String,
+}
+
+/// `ConfigAnalyzer.analyse` over what the engine has seen: the last 100 tick times (the chunk count is the one loaded now,
+/// the port keeps no chunk history) and the recorded changes.
+fn findings(e: &Engine, o: &Observation) -> Vec<Finding> {
+    let c = e.config();
+    let samples = &o.samples_ms;
+    if samples.len() < 10 {
+        return vec![Finding {
+            severity: "fine",
+            option: "-",
+            suggestion: "Not enough data yet - leave it running for an hour or so.".into(),
+            because: format!("Only {} MSPT samples so far; 10 are needed before any of this would mean anything.", samples.len()),
+        }];
+    }
+    let peak = samples.iter().copied().fold(0.0, f64::max);
+    let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+    let peak_chunks = f64::from(o.loaded_chunks);
+    let mut out = Vec::new();
+    if peak < c.increase_mspt * 0.5 {
+        out.push(Finding {
+            severity: "suggestion",
+            option: "world-settings.<world>.max-view-distance",
+            suggestion: "Raise the per-world maximums - this server has room to spare.".into(),
+            because: format!("Peak MSPT was {peak:.1}ms against an increase threshold of {:.1}ms. It never came close to being busy, so the ceiling is what is limiting view distance, not performance.", c.increase_mspt),
+        });
+    }
+    let gap = c.decrease_mspt - c.increase_mspt;
+    if gap < 5.0 {
+        let suggested = (c.decrease_mspt * 0.85).max(1.0);
+        out.push(Finding {
+            severity: "problem",
+            option: "reactive-mode-settings.increase-mspt-threshold",
+            suggestion: format!("Widen the gap - try {suggested:.0}, keeping decrease at {:.0}.", c.decrease_mspt),
+            because: format!("Only {gap:.1}ms separates the two thresholds. That is the dead zone the distance is meant to settle in; too narrow and it steps up and down forever."),
+        });
+    }
+    if mean > c.decrease_mspt {
+        out.push(Finding {
+            severity: "problem",
+            option: "-",
+            suggestion: "This server is over its decrease threshold on average, not just at peaks.".into(),
+            because: format!("Mean MSPT {mean:.1}ms is above the {:.1}ms threshold. The plugin will hold distances at the minimum and cannot fix the underlying load - look for the cause first.", c.decrease_mspt),
+        });
+    }
+    let history: Vec<_> = e.history().map(|(_, ch)| ch).collect();
+    if history.len() >= 6 {
+        let mut flips = 0;
+        let mut previous: Option<bool> = None;
+        for ch in history.iter().rev() {
+            let up = ch.to.view > ch.from.view || ch.to.sim > ch.from.sim;
+            if previous.is_some_and(|p| p != up) {
+                flips += 1;
+            }
+            previous = Some(up);
+        }
+        if flips >= history.len() / 2 {
+            out.push(Finding {
+                severity: "problem",
+                option: "reactive-mode-settings.revert-increase-if-overloaded",
+                suggestion: "Turn this on, and widen the threshold gap.".into(),
+                because: format!("{flips} of the last {} changes reversed direction. The distance is hunting rather than settling.", history.len()),
+            });
+        }
+    }
+    let seconds_per_step = (c.ticks_per_check as f64 / 20.0) * f64::from(c.passed_checks_for_increase);
+    let seconds_per_chunk = seconds_per_step / f64::from(c.max_increase_step.max(1));
+    if seconds_per_chunk > 120.0 {
+        out.push(Finding {
+            severity: "suggestion",
+            option: "passed-checks-for-increase",
+            suggestion: format!("Lower to {}, or raise max-increase-step to 2.", (c.passed_checks_for_increase / 2).max(2)),
+            because: format!("At {} checks of {:.0}s and {} chunk(s) a step, growing one chunk takes {:.1} minutes. Climbing from minimum to maximum would take most of an hour of uninterrupted good health.", c.passed_checks_for_increase, c.ticks_per_check as f64 / 20.0, c.max_increase_step, seconds_per_chunk / 60.0),
+        });
+    }
+    if c.max_decrease_step < c.max_increase_step {
+        out.push(Finding {
+            severity: "problem",
+            option: "reactive-mode-settings.max-decrease-step",
+            suggestion: "Raise it to at least max-increase-step.".into(),
+            because: format!("Distance grows {} at a time but shrinks only {}. Under load it cannot give back what it took as fast as it took it.", c.max_increase_step, c.max_decrease_step),
+        });
+    }
+    if matches!(c.mode, crate::viewdistance_core::config::Mode::Mixed | crate::viewdistance_core::config::Mode::Proactive) {
+        let target = c.ticking_target + c.non_ticking_target;
+        if target > 0.0 {
+            let used = peak_chunks / target;
+            if used > 0.95 && peak < c.increase_mspt {
+                out.push(Finding {
+                    severity: "suggestion",
+                    option: "proactive-mode-settings.global-ticking-chunk-count-target",
+                    suggestion: format!("Raise the targets - try {} ticking.", (c.ticking_target * 1.3) as i64),
+                    because: format!("Chunk count reached {:.0}% of the budget while peak MSPT stayed at {peak:.1}ms, below the {:.1}ms increase threshold. The budget is the ceiling here, not performance.", used * 100.0, c.increase_mspt),
+                });
+            } else if used < 0.4 && peak > c.decrease_mspt {
+                out.push(Finding {
+                    severity: "suggestion",
+                    option: "proactive-mode-settings.global-ticking-chunk-count-target",
+                    suggestion: format!("Lower the targets - try {} ticking.", (c.ticking_target * 0.7) as i64),
+                    because: format!("MSPT peaked at {peak:.1}ms while only {:.0}% of the chunk budget was in use. The budget is set higher than this hardware can carry, so MSPT has to do the braking alone.", used * 100.0),
+                });
+            }
+        }
+    }
+    if out.is_empty() {
+        out.push(Finding {
+            severity: "fine",
+            option: "-",
+            suggestion: "Nothing worth changing.".into(),
+            because: format!("Mean MSPT {mean:.1}, peak {peak:.1} over {} samples, and the distances are not fighting themselves.", samples.len()),
+        });
+    }
+    out
+}
+
+/// `/vdt analyze`
+fn analyze(e: &Engine, o: &Observation) -> Vec<String> {
+    let mut lines = vec![t("analyze.header", "&6--- Config analysis --- &7(suggestions only, nothing is changed)", &[])];
+    for f in findings(e, o) {
+        let named = f.option != "-";
+        let (key, default) = match (f.severity, named) {
+            ("problem", true) => ("analyze.problem", "&c! &f{option} &7- &f{suggestion}"),
+            ("problem", false) => ("analyze.problem-general", "&c! &f{suggestion}"),
+            ("suggestion", true) => ("analyze.suggestion", "&e~ &f{option} &7- &f{suggestion}"),
+            ("suggestion", false) => ("analyze.suggestion-general", "&e~ &f{suggestion}"),
+            _ => ("analyze.fine", "&a+ &f{suggestion}"),
+        };
+        lines.push(t(key, default, &[("option", f.option.to_string()), ("suggestion", f.suggestion)]));
+        lines.push(t("analyze.because", "&8    {because}", &[("because", f.because)]));
+    }
+    lines.push(t("analyze.footer", "&7Apply anything you agree with in config.yml, then &f/vdt reload&7.", &[]));
+    lines
+}
+
+/// `/vdt doctor`: the checks of the original that apply here (thresholds, limits, memory, enabled).
+fn doctor(e: &Engine, o: &Observation) -> Vec<String> {
+    let c = e.config();
+    let mut checks: Vec<(&str, String)> = Vec::new();
+    if !e.active() {
+        checks.push(("warn", "The plugin is disabled (enabled: false or /vdt disable). Nothing is adjusted.".into()));
+    }
+    if c.increase_mspt >= c.decrease_mspt {
+        checks.push(("problem", format!("increase-mspt-threshold ({}) is not below decrease-mspt-threshold ({}). Distances will flip up and down. Keep a gap of at least 5 ms.", c.increase_mspt, c.decrease_mspt)));
+    } else {
+        checks.push(("ok", format!("MSPT thresholds: up below {} ms, down above {} ms.", c.increase_mspt, c.decrease_mspt)));
+    }
+    if c.min_sim > c.max_sim || c.min_view > c.max_view {
+        checks.push(("problem", format!("World 'world' has a minimum above its maximum (sim {}-{}, view {}-{}).", c.min_sim, c.max_sim, c.min_view, c.max_view)));
+    }
+    if let Some(free) = o.free_memory_percent {
+        checks.push((if free < 15.0 { "warn" } else { "ok" }, format!("Free memory: {free:.0}%{}", if free < 15.0 { ". Increases are blocked until more is free." } else { "." })));
+    }
+    checks.push(("ok", "PlaceholderAPI: not used by this port (see the README)".into()));
+    let mut lines = vec![t("doctor.header", "&6--- ViewDistanceTweaks doctor --- &7(reads only, changes nothing)", &[])];
+    let mut problems = 0;
+    for (kind, text) in checks {
+        if kind == "problem" {
+            problems += 1;
+        }
+        let default = match kind {
+            "ok" => "&a+ &f{text}",
+            "warn" => "&e~ &f{text}",
+            _ => "&c! &f{text}",
+        };
+        lines.push(t(&format!("doctor.{kind}"), default, &[("text", text)]));
+    }
+    lines.push(if problems == 0 {
+        t("doctor.footer-ok", "&aNo problems found. Paste this output into a bug report if something still looks wrong.", &[])
+    } else {
+        t("doctor.footer-problems", "&c{count} problem(s) found. Fix them in config.yml, then &f/vdt reload&c.", &[("count", problems.to_string())])
     });
     lines
 }
@@ -635,5 +891,26 @@ mod tests {
             vec!["&cUsage: /vdt diagnose note <text>".to_string()]
         );
         assert_eq!(run(&mut e, "vdt diagnose on", D, &obs()).unwrap().diagnose, Some(Diagnose::On));
+    }
+
+    #[test]
+    fn presets_analyze_and_doctor() {
+        let mut e = engine();
+        let r = run(&mut e, "vdt preset large-network", D, &obs()).unwrap();
+        assert_eq!(r.lines, vec!["&aApplied preset &flarge-network&a (9 values changed). Config reloaded - fine-tune further as needed.".to_string()]);
+        assert_eq!((e.config().max_sim, e.config().max_view, e.config().increase_mspt), (8, 12, 38.0));
+        let r = run(&mut e, "vdt preset nope", D, &obs()).unwrap();
+        assert_eq!(r.lines, vec!["&cUnknown preset: nope &7(available: small-server, large-network, performance-first)".to_string()]);
+        assert_eq!(run(&mut e, "vdt preset", D, &obs()).unwrap().lines, vec!["&cUsage: /vdt preset <small-server|large-network|performance-first>".to_string()]);
+        // Twelve ms flat against the default thresholds: nothing to change but the ceiling.
+        let a = run(&mut e, "vdt analyze", D, &obs()).unwrap().lines;
+        assert_eq!(a[0], "&6--- Config analysis --- &7(suggestions only, nothing is changed)");
+        assert!(a[1].starts_with("&e~ &fworld-settings.<world>.max-view-distance"), "{}", a[1]);
+        assert!(a.last().unwrap().contains("/vdt reload"));
+        let few = Observation { samples_ms: vec![1.0; 3], ..obs() };
+        assert_eq!(run(&mut e, "vdt analyse", D, &few).unwrap().lines[1], "&a+ &fNot enough data yet - leave it running for an hour or so.");
+        let d = run(&mut e, "vdt doctor", D, &obs()).unwrap().lines;
+        assert!(d[1].starts_with("&a+ &fMSPT thresholds"), "{}", d[1]);
+        assert!(d.last().unwrap().starts_with("&aNo problems found."));
     }
 }

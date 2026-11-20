@@ -23,6 +23,20 @@ use crate::viewdistance_core::{Change, Distances, Event, Observation, PlayerSamp
 
 const ID: &str = "viewdistance";
 const CONFIG_FILE: &str = "viewdistance.toml";
+/// The reworded answers (the original's `messages.yml`), next to the config; written with the defaults when missing.
+const MESSAGES_FILE: &str = "viewdistance-messages.yml";
+
+/// Reads `config/viewdistance-messages.yml` (writing the default file first when there is none) as the messages in force.
+fn load_messages(host: &dyn ServerHost) {
+    let path = host.instance_dir().join("config").join(MESSAGES_FILE);
+    if !path.exists() {
+        let _ = std::fs::create_dir_all(path.parent().unwrap_or_else(|| std::path::Path::new(".")));
+        let _ = std::fs::write(&path, crate::viewdistance_core::messages::DEFAULT_YAML);
+    }
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        crate::viewdistance_core::messages::load(&text);
+    }
+}
 const OVERWORLD: &str = "minecraft:overworld";
 /// The level the original asks for its fixed-distance nodes: a permissions mod must grant them,
 /// the operator fallback stays out (no arismoko operator level reaches 5).
@@ -430,7 +444,8 @@ impl Hooks for Mod {
             if let Some(node) = command::node_of(&event.command) {
                 let held = host.player(event.player).is_some_and(|p| grants(&mut *host, p, node, level));
                 if !held {
-                    event.replies.push(coloured(&*host, "&cNo permission."));
+                    load_messages(&*host);
+                    event.replies.push(coloured(&*host, &format!("{}{}", crate::viewdistance_core::messages::prefix(), crate::viewdistance_core::messages::t("no-permission", "&cNo permission.", &[]))));
                     event.cancelled = true;
                     return Flow::Cancel;
                 }
@@ -455,6 +470,7 @@ impl Hooks for Mod {
         let Some(line) = typed_line(&event.command.literals, &present) else {
             return Flow::Continue;
         };
+        load_messages(&*host);
         let base = self.live(&*host);
         let players = host.players().server_players();
         let loaded = loaded_chunks(&*host);
@@ -467,7 +483,7 @@ impl Hooks for Mod {
             let path = host.instance_dir().join("config").join(CONFIG_FILE);
             match std::fs::read_to_string(&path) {
                 Ok(text) => {
-                    lines.push("&aConfiguration reloaded.".into());
+                    lines.push(crate::viewdistance_core::messages::t("reloaded", "&aConfiguration reloaded.", &[]));
                     lines.extend(crate::viewdistance_core::load_config(&text).into_iter().map(|p| format!("&e{p}")));
                 }
                 Err(e) => lines.push(format!("&c{e}")),

@@ -140,6 +140,8 @@ horizon-launcher native-build <path to this folder> --server-output <dir> --vers
 
 ## Known gaps
 
+- Round 3: `messages.yml` (`config/viewdistance-messages.yml`), `/vdt preset`, `/vdt analyze`, `/vdt doctor` are ported. Still open: `/vdt pregen`, `/vdt update`, per-world sections (one world per Horizon server), per-player ping/AFK distances (no API).
+
 What does not work yet on Horizon main (each is marked `HMOD-GAP(...)` in `src/lib.rs`, see `HMOD_PORT.md`):
 
 - Per-player view and simulation distances are not sent (no player-level setter), and player ping and idle time are

@@ -1,0 +1,214 @@
+# ============================================================
+#   ViewDistanceTweaks - Messages
+# ============================================================
+# Every message the plugin sends can be changed here.
+# Colours use & codes (&a green, &c red, &7 grey, ...).
+# {placeholders} are filled in by the plugin - keep them intact,
+# but you may reorder or omit them freely.
+#
+# You can safely delete any key: the plugin falls back to its
+# built-in English text for anything missing. Delete the whole
+# file to regenerate a complete, up-to-date copy on next start.
+
+# Prepended to every message. Leave empty for no prefix.
+# Example: "&8[&bVDT&8] &r"
+prefix: ""
+
+# --- Generic ------------------------------------------------
+no-permission: "&cNo permission."
+world-not-found: "&cWorld not found: {world}"
+invalid-value: "&cInvalid value (minimum {min})."
+invalid-range: "&cInvalid value: &f{value}&c. Must be between &f{min}&c and &f{max}&c."
+
+reloaded: "&aConfiguration reloaded."
+enabled: "&aPlugin enabled."
+disabled: "&cPlugin disabled."
+
+# --- /vdt status --------------------------------------------
+status:
+  header: "&6=== ViewDistanceTweaks Status ==="
+  summary: "&7Mode: &f{mode} &7| MSPT: &f{mspt} &7| TPS: &f{tps} &7| Active: &f{active}"
+  variance: "&7MSPT variance (stddev): {color}{stddev}ms &7(threshold: &f{threshold}ms&7){warning}"
+  variance-unstable: " &c⚠ unstable"
+  variance-no-samples: "&7MSPT variance: &8not enough samples yet"
+  grace: "&e⏳ Startup grace active: &f{seconds}s remaining &7(sim={sim}, view={view})"
+  update: "&eUpdate available: &f{version} &e→ modrinth.com/project/{project}"
+  world: "&e{world} &7| Sim: &f{sim} &7| View: &f{view} &7| Ticking: &f{ticking} &7| Non-Ticking: &f{nonticking}"
+  world-weight: " &7| Weight: &f{weight}"
+  world-next-check: " &7| Next check: &f{seconds}s"
+  world-next-check-override: " &8(override: {interval}t)"
+
+  # /vdt status --fixed
+  fixed:
+    header: "&6=== Active per-player overrides ==="
+    none: "&7No player currently has a fixed view or simulation distance."
+    disabled: "&7No per-player distance feature is enabled in config.yml &8(per-player-fixed-view-distance, per-player-fixed-simulation-distance, afk-player-throttling, ping-throttling)."
+    entry: "&e{player} &7in &f{world}"
+    view: "  &7View: &a{value} &8(world: {worldValue}) {source}"
+    sim: "  &7Sim:  &a{value} &8(world: {worldValue}) {source}"
+    source-afk: "&6[AFK]"
+    source-ping: "&b[PING]"
+    source-permission: "&8[permission]"
+    hint: "&8Grant &7{viewPrefix}<2-32> &8or &7{simPrefix}<2-32>&8; highest value wins."
+
+  # 2.7 subsystem lines (only shown when the feature is enabled)
+  profile: "&7Active profile: &b{profile}"
+  memory: "&7Free heap: {color}{free}% &7(min {threshold}% | {used}MB live / {max}MB){warning}"
+  memory-blocking: " &c⚠ increases blocked"
+  afk: "&7AFK players throttled: &f{count} &8(via {source})"
+  ping: "&7High-ping players throttled: &f{count} &8(threshold {threshold}ms)"
+  relief: "&c⚠ Emergency relief active in: &f{worlds}"
+  world-complexity: " &7| Complexity: &f{multiplier}"
+  world-chunkgen: " &7| Chunk gen: {color}{rate}/s"
+  world-contested: " &c| not managed: overwritten by something else"
+  world-client-view: " &7| Client max: &f{client}"
+  world-cluster: " &7| Cluster bonus: &a+{bonus}"
+
+# --- /vdt profile -------------------------------------------
+profile:
+  current: "&7Active profile: &b{profile}"
+  available: "&7Available: &f{profiles}"
+  unknown: "&cUnknown profile: {profile} &7(available: {profiles})"
+  applied: "&aSwitched to profile &f{profile}&a."
+
+# --- /vdt history -------------------------------------------
+history:
+  header: "&6=== Last {count} distance changes ==="
+  empty: "&7No distance changes recorded yet since the last restart."
+  entry: "&8{ago} &e{world} &7Sim: &f{oldSim}&7→&a{newSim} &7View: &f{oldView}&7→&a{newView}"
+  reason: "  &8{reason}"
+
+# --- /vdt simulate ------------------------------------------
+simulate:
+  disabled: "&cPlugin is disabled - enable it first (/vdt enable) to simulate a check."
+  header: "&6=== /vdt simulate {world} ==="
+  note: "&7This shows what the NEXT check would compute. Nothing is applied."
+  mspt: "&7Current MSPT: &f{mspt} &7| stddev: &f{stddev}"
+  empty: "&7Nothing to simulate (no worlds matched)."
+  entry: "&e{world} &7| Sim: &f{currentSim} {arrow} {color}{targetSim} &7| View: &f{currentView} {arrow} {color}{targetView}"
+  reason: "  &8{reason}{verdict}"
+  would-apply: " &a[would apply]"
+  would-not-apply: " &8[not yet / no change]"
+
+# --- /vdt simulationdistance & /vdt viewdistance ------------
+override:
+  usage-sim: "&cUsage: /vdt simulationdistance <value> [world] [--duration <min>]"
+  usage-view: "&cUsage: /vdt viewdistance <value> [world] [--duration <min>]"
+  view-below-sim: "&e{world}: requested view distance {view} is below simulation distance {sim} - using {sim} instead (view must be >= sim)."
+  applied-temporary: "&a{label} set for {minutes} min."
+  applied-permanent: "&a{label} set (permanent until reload)."
+  label-sim: "Simulation distance"
+  label-view: "View distance"
+
+# --- /vdt analyze -------------------------------------------
+analyze:
+  header: "&6--- Config analysis --- &7(suggestions only, nothing is changed)"
+  problem: "&c! &f{option} &7- &f{suggestion}"
+  suggestion: "&e~ &f{option} &7- &f{suggestion}"
+  fine: "&a+ &f{suggestion}"
+  problem-general: "&c! &f{suggestion}"
+  suggestion-general: "&e~ &f{suggestion}"
+  because: "&8    {because}"
+  footer: "&7Apply anything you agree with in config.yml, then &f/vdt reload&7."
+
+# --- /vdt diagnose ------------------------------------------
+diagnose:
+  active: "&aDiagnostics are recording to &f{folder}&a, one file per day. &7/vdt diagnose off stops it."
+  inactive: "&7Diagnostics are off. &f/vdt diagnose on &7starts recording to &f{folder}&7."
+  status: "&7Today: &f{file} &7({size} KB, {entries} entries since start), a sample every &f{interval}s&7."
+  note-saved: "&aNote saved."
+  note-usage: "&cUsage: /vdt diagnose note <text>"
+
+# --- /vdt doctor --------------------------------------------
+doctor:
+  header: "&6--- ViewDistanceTweaks doctor --- &7(reads only, changes nothing)"
+  ok: "&a+ &f{text}"
+  warn: "&e~ &f{text}"
+  problem: "&c! &f{text}"
+  footer-ok: "&aNo problems found. Paste this output into a bug report if something still looks wrong."
+  footer-problems: "&c{count} problem(s) found. Fix them in config.yml, then &f/vdt reload&c."
+
+# --- /vdt mspt ----------------------------------------------
+mspt:
+  avg: "&7MSPT (avg): &f{mspt}"
+  tps: "&7TPS:        &f{tps}"
+  stddev: "&7MSPT stddev: &f{stddev} &7(threshold: &f{threshold}&7)"
+  samples: "&7Samples: &f{count} &7(source: Paper getTickTimes)"
+  minmax: "&7Min: &f{min} &7Max: &f{max}"
+  last10: "&7Last 10: &f{values}"
+  unavailable: "&cgetTickTimes() unavailable on this server jar: {error}"
+  perworld:
+    header: "&7Per-world MSPT &8(&f{source}&8)&7:"
+    entry: "&7  {world}: &f{mspt}ms &7({share}% of tick){flags}"
+    judged: "&7    judged at &f{effective}ms &7(x{factor} of server-wide)"
+    state: "&7Per-world MSPT: &f{state}"
+    estimated: " &8(estimated)"
+    over: " &c(over budget)"
+
+# --- /vdt update --------------------------------------------
+update:
+  checking: "&7Running update check..."
+  failed: "&cUpdate check failed."
+  up-to-date: "&aPlugin is up to date ({version})."
+  ahead: "&aYou are running &f{version}&a, which is newer than the latest accepted version (&f{latest}&a). &7Nothing will be offered until a version in your accepted-release-types passes it."
+  available: "&eUpdate available: &f{version}"
+  link: "&7modrinth.com/project/{project}"
+  # Auto-update (2.8+)
+  downloading: "&7Downloading {version}..."
+  staged: "&aDownloaded {version}. &7It will be installed on the next server restart."
+  already-staged: "&a{version} is already waiting in the update folder. &7Restart to apply it."
+  download-failed: "&cDownload failed: &7{reason}"
+  auto-disabled: "&7Auto-update is off. Enable auto-update.enabled in config.yml, or run &f/vdt update download&7."
+
+# --- /vdt preset --------------------------------------------
+preset:
+  usage: "&cUsage: /vdt preset <{presets}>"
+  unknown: "&cUnknown preset: {preset} &7(available: {presets})"
+  applied: "&aApplied preset &f{preset}&a ({count} values changed). Config reloaded - fine-tune further as needed."
+
+# --- Help ---------------------------------------------------
+
+# Idle pre-generation (/vdt pregen)
+pregen:
+  auto-disabled: "&7Note: automatic pre-generation is off, so this run will not restart by itself. &8(idle-pregeneration.enabled in config.yml)"
+  usage-start: "&cUsage: &f/vdt pregen start <world> [radius] [--here]"
+  start-failed: "&cCould not start: &7{reason}"
+  started: "&aPre-generation started for &f{world}&a: radius {radius} chunks (~{blocks} blocks), &f{chunks}&a chunks total."
+  border-clamped: "&eNote: the world border only leaves room for &f{actual}&e chunks - starting there instead of the requested {requested}."
+  large-warning: "&e⚠ That is {chunks} chunks - expect this to run for many hours. &7/vdt pregen stop keeps the progress, /vdt pregen cancel --confirm discards it."
+  already-running: "&7That run is already going. &8Use /vdt pregen status to see it."
+  not-running: "&7No pre-generation run is active."
+  paused: "&ePre-generation paused. &7Progress is kept."
+  resumed: "&aPre-generation resumed."
+  stopped: "&ePre-generation stopped. &7Progress kept - use &f/vdt pregen resume&7 to continue."
+  cancel-confirm: "&cThis discards {processed}/{total} chunks of progress. &7Run &f/vdt pregen cancel --confirm&7 if you are sure."
+  cancelled: "&cPre-generation cancelled and progress deleted."
+  status-header: "&6=== Pre-generation ==="
+  status-world: "&7World: &f{world} &7| Radius: &f{radius} &7chunks around &f{centerX},{centerZ}"
+  status-progress: "&7Progress: &f{processed}&7/&f{total} &7(&a{percent}%&7) &8| generated {generated}, already existed {existing}"
+  status-rate: "&7Rate: &f{generating} &7generating &8| &f{skipping} &7skipping existing &7| ETA: &f{eta}"
+  status-paused: "&e⏸ Paused: &7{reason}"
+  eta-unknown: "not known yet (still crossing existing terrain)"
+  usage-schedule: "&cUsage: &f/vdt pregen schedule <world> <radius> <HH:mm>&7, or &f/vdt pregen schedule cancel"
+  schedule-set: "&aScheduled: &f{world}&a, radius {radius} chunks, daily at &f{time}&a server time &7(next run in {eta})&a."
+  schedule-cancelled: "&ePre-generation schedule cancelled."
+  schedule-none: "&7No pre-generation run is scheduled."
+  schedule-status: "&7Scheduled: &f{world}&7, radius {radius} chunks &8| next run in &f{eta}"
+
+help:
+  header: "&6--- VDT Commands ---"
+  reload: "&e/vdt reload                              &7- Reload configuration"
+  status: "&e/vdt status [--weight|--fixed]           &7- Show status"
+  simulate: "&e/vdt simulate [world]                    &7- Preview next check without applying it"
+  history: "&e/vdt history                             &7- Show recent distance changes"
+  analyze: "&e/vdt analyze                             &7- Suggestions from this server's own history"
+  doctor: "&e/vdt doctor                              &7- Check setup, conflicts and updates in one go"
+  diagnose: "&e/vdt diagnose [on|off|status|note <text>] &7- Record what the plugin sees to a log file"
+  simulationdistance: "&e/vdt simulationdistance <value> [world] [--duration <min>]"
+  viewdistance: "&e/vdt viewdistance <value> [world] [--duration <min>]"
+  toggle: "&e/vdt enable / disable                    &7- Toggle the plugin"
+  mspt: "&e/vdt mspt                                &7- Show MSPT, TPS & variance"
+  preset: "&e/vdt preset <{presets}>"
+  profile: "&e/vdt profile [name]                      &7- Show or switch the active profile"
+  update: "&e/vdt update [download]                   &7- Check for updates, or download one now"
+  pregen: "&e/vdt pregen <start|pause|resume|stop|cancel|schedule|status>  &7- Pre-generate terrain"
