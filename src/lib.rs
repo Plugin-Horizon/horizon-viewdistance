@@ -372,7 +372,7 @@ impl Hooks for Mod {
     fn tab_complete(&self, _: &mut dyn ServerHost, event: &mut TabCompleteEvent<'_>) {
         let line = event.command.trim_start_matches('/');
         let mut words: Vec<&str> = line.split_whitespace().collect();
-        if !words.first().is_some_and(|w| w.eq_ignore_ascii_case("vdt")) {
+        if !words.first().is_some_and(|w| command::is_label(w)) {
             return;
         }
         // The word being typed is the last one, empty after a trailing space.
@@ -424,8 +424,13 @@ impl Hooks for Mod {
         // sub-command (`viewdistancetweaks.vdt.command.*`) and answers `&cNo permission.` as the original does.
         // The operator level decides when no permissions mod answers.
         let level = crate::viewdistance_core::permissions().1;
+        // Both labels: `/vdt` and Bukkit's namespaced `/viewdistancetweaks:vdt` (plugin.yml registers both).
         for usage in command::USAGES.iter() {
-            event.commands.push(Command::op(usage, level).with_node(&perm_node("viewdistancetweaks.command.vdt")));
+            let Some(tail) = usage.strip_prefix("vdt") else { continue };
+            for label in command::LABELS {
+                let usage = format!("{label}{tail}");
+                event.commands.push(Command::op(&usage, level).with_node(&perm_node("viewdistancetweaks.command.vdt")));
+            }
         }
     }
 
@@ -434,7 +439,7 @@ impl Hooks for Mod {
         // gets Bukkit's no-permission line, not "Unknown command". The node is the provider's answer, else the
         // operator level `command-min-permission`.
         let root = event.command.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
-        if root != "vdt" {
+        if !command::is_label(&root) {
             return Flow::Continue;
         }
         let level = crate::viewdistance_core::permissions().1;
@@ -458,7 +463,7 @@ impl Hooks for Mod {
     }
 
     fn run_mod_command(&self, host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>) -> Flow {
-        if event.command.literals.first().map(String::as_str) != Some("vdt") {
+        if !event.command.literals.first().is_some_and(|w| command::is_label(w)) {
             return Flow::Continue;
         }
         let present: Vec<(String, String)> = event
@@ -467,7 +472,10 @@ impl Hooks for Mod {
             .iter()
             .filter_map(|a| argument_text(&a.value).map(|t| (a.name.clone(), t)))
             .collect();
-        let Some(line) = typed_line(&event.command.literals, &present) else {
+        // The usages are written with `vdt`; a namespaced label is matched as that one.
+        let mut literals = event.command.literals.clone();
+        literals[0] = "vdt".to_owned();
+        let Some(line) = typed_line(&literals, &present) else {
             return Flow::Continue;
         };
         load_messages(&*host);

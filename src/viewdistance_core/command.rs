@@ -61,12 +61,20 @@ pub const SUB_NODES: [&str; 8] = [
     "viewdistancetweaks.vdt.command.pregen",
 ];
 
+/// The two labels the command is registered under: `vdt` and Bukkit's namespaced `viewdistancetweaks:vdt`.
+pub const LABELS: [&str; 2] = ["vdt", "viewdistancetweaks:vdt"];
+
+/// Whether a typed command word is one of `LABELS` (case does not matter).
+pub fn is_label(word: &str) -> bool {
+    LABELS.iter().any(|label| label.eq_ignore_ascii_case(word))
+}
+
 /// The group node a `/vdt` line needs besides the root node (without the slash): the node of the
 /// sub-command word, as the original's `onCommand` switch maps it. None for the bare command, unknown
 /// words and help, which need the root node only; None when the line is not `/vdt`.
 pub fn node_of(line: &str) -> Option<&'static str> {
     let words: Vec<&str> = line.split_whitespace().collect();
-    if !words.first()?.eq_ignore_ascii_case("vdt") {
+    if !is_label(words.first()?) {
         return None;
     }
     let sub = words.get(1)?.to_ascii_lowercase();
@@ -756,6 +764,18 @@ mod tests {
         assert_eq!(node_of("vdt simulationdistance 8"), Some("viewdistancetweaks.vdt.command.simulationdistance"));
         assert_eq!(node_of("tpa Steve"), None);
         assert_eq!(node_of(""), None);
+        assert_eq!(node_of("viewdistancetweaks:vdt status"), Some("viewdistancetweaks.vdt.command.status"));
+        assert_eq!(node_of("VIEWDISTANCETWEAKS:VDT reload"), Some("viewdistancetweaks.vdt.command.reload"));
+    }
+
+    #[test]
+    fn both_labels_are_recognised() {
+        assert!(is_label("vdt"));
+        assert!(is_label("VDT"));
+        assert!(is_label("viewdistancetweaks:vdt"));
+        assert!(!is_label("viewdistancetweaks"));
+        assert!(!is_label("vdtx"));
+        assert_eq!(LABELS, ["vdt", "viewdistancetweaks:vdt"]);
     }
 
     #[test]
