@@ -11,7 +11,7 @@
 pub mod viewdistance_core;
 use mod_api::{
     Command, CommandArgumentValue, Config, ConfigKind, ConfigLoadingEvent, ConfigReloadingEvent,
-    Flow, HostSide, Hooks, LevelRef, PlayerRef, RegisterCommandsEvent, RegisterConfigsEvent,
+    Flow, HostSide, Hooks, LevelRef, PlayerRef, RegisterNodeCommandsEvent, RegisterConfigsEvent,
     ChunkLoadEvent, PlayerCommandEvent, RunModCommandEvent, ServerAboutToStartEvent, ServerHost, ServerStoppingEvent, ServerTickEvent,
     ServerTickPhase, Suggestion, TabCompleteEvent, Text,
     NodeDefault, PermissionGatherNodesEvent, PermissionLevel, PermissionNode, PermissionValueType,
@@ -418,7 +418,7 @@ impl Hooks for Mod {
         log(&format!("server starts at view {} sim {}", base.view, base.sim));
     }
 
-    fn register_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
+    fn register_node_commands(&self, _: &mut dyn ServerHost, event: &mut RegisterNodeCommandsEvent<'_>) {
         // Bukkit gates all of /vdt with the plugin.yml `permission:` `viewdistancetweaks.command.vdt` (default
         // op), so every usage is gated by the root node; `player_command` then asks the group node of the
         // sub-command (`viewdistancetweaks.vdt.command.*`) and answers `&cNo permission.` as the original does.
