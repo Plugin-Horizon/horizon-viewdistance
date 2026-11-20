@@ -1,5 +1,9 @@
 # horizon-viewdistance
 
+## Port status
+
+Compared with ViewDistanceTweaks 2.15.0 (a236c49) (estimate): **59 %** of the original's commands, permissions, config keys, messages and features work today; **61 %** once our open Horizon PRs are merged; the engine and SDK figures are not estimated. Estimated count: ~117/~200 items. Status: not yet compiled after the 2026-11-20 round.
+
 > **Unofficial Rust port of ViewDistanceTweaks for the Horizon server (https://github.com/arismoko/horizon). Not affiliated with or endorsed by the ViewDistanceTweaks authors.**
 
 Derived from ViewDistanceTweaks (https://codeberg.org/LucasTHCR/ViewDistanceTweaks, GPL-3.0), version 2.15.0.
