@@ -147,8 +147,9 @@ What does not work yet on Horizon main (each is marked `HMOD-GAP(...)` in `src/l
 - Per-player view and simulation distances are not sent (no player-level setter), and player ping and idle time are
   not available: the AFK, ping and fixed-by-permission throttles never fire, whatever the README sections above say.
 - The generated-chunk total is counted from `chunk_load` (`new` chunks), all dimensions together.
-- Not ported: `messages.yml` (the texts are fixed English), `/vdt analyze|doctor|preset|pregen|update`, the config keys
-  of those features and of per-world settings, `/viewdistancetweaks:vdt` (a namespaced label is not a legal literal).
+- Not ported: `/vdt pregen|update`, the config keys
+  of those features and of per-world settings.
+- `/viewdistancetweaks:vdt` is registered next to `/vdt` (written blind; drop the second label if the host refuses the colon).
 - The variance overload steps down once by `max-decrease-step` (the original adds an extra cut on top of its target).
 
 ## Licence

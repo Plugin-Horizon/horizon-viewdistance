@@ -1,5 +1,10 @@
 # hmod port: viewdistance
-Parity: before 45% -> after 58% (~117/~200 items; method: commands+sub-commands, permission nodes, config keys, message keys and listed behaviours of the original counted, an item blocked by a missing engine API counts as not done). Blind-written, not compiled.
+Parity: 59% now / 59% with our PRs (~119/~200 items; method: commands+sub-commands, permission nodes, config keys, message keys and listed behaviours of the original counted, an item blocked by a missing engine API counts as not done). Blind-written, not compiled.
+
+Round 4 (blind, audit pass)
+- Added: `/vdt` is registered under both labels, `vdt` and `viewdistancetweaks:vdt` (`command::LABELS`, `command::is_label`; `register_commands`, `player_command`, `run_mod_command`, tab completion). The colon in a literal is untested on the host parser: drop the second label if it is refused.
+- Changed: `/vdt status --fixed` takes its entry, view, sim, source and hint lines from the messages.yml keys (`status.fixed.*`) with the original's placeholders.
+- Open: the player's name in the fixed entries (the engine only holds the UUID), predictive preloading and complexity weighting (both need a chunk-request or tile-entity host call, see GAPS_UPSTREAM), `/vdt pregen`, `/vdt update`.
 
 Round 3 (100 % round)
 - Added: `messages.yml` (file `config/viewdistance-messages.yml`, written with the original's complete defaults when missing, read on every `/vdt` use): nested keys, `prefix`, `{placeholders}`; every answer of enable/disable/status header+summary+fixed/history/simulate/profile/override/reload/no-permission/preset/analyze/doctor reads its key and falls back to the built-in English text (src/viewdistance_core/messages.rs).
