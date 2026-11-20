@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 /// The file written when `config/viewdistance.toml` is missing.
-pub const DEFAULT_TOML: &str = include_str!("../default.toml");
+pub const DEFAULT_TOML: &str = include_str!("../../data/viewdistance/default.toml");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -151,8 +151,23 @@ impl Config {
                 },
             }
         };
+        // The original clamps a number into its range instead of dropping it; only text that is not a number
+        // is reported and replaced by the default.
+        let mut bad_clamp: Vec<String> = Vec::new();
+        let mut clamp = |key: &str, default: f64, min: f64, max: f64| -> f64 {
+            match v.get(key) {
+                None => default,
+                Some(raw) => match raw.parse::<f64>() {
+                    Ok(n) if n.is_finite() => n.clamp(min, max),
+                    _ => {
+                        bad_clamp.push(format!("{key}: expected a number, got {raw}"));
+                        default
+                    }
+                },
+            }
+        };
         let start_delay = num("start-delay", 2400.0, 0.0) as u64;
-        let ticks_per_check = num("ticks-per-check", 200.0, 1.0) as u64;
+        let ticks_per_check = clamp("ticks-per-check", 200.0, 20.0, f64::MAX) as u64;
         let passed_up = num("passed-checks-for-increase", 9.0, 1.0) as u32;
         let passed_down = num("passed-checks-for-decrease", 1.0, 1.0) as u32;
         let ticking_target = num("proactive-mode-settings.global-ticking-chunk-count-target", 5780.0, 0.0);
@@ -171,19 +186,23 @@ impl Config {
         let variance_threshold = num(&format!("{va}variance-threshold"), 8.0, 0.0);
         let variance_min_samples = num(&format!("{va}min-samples"), 20.0, 2.0) as usize;
         let variance_min_avg = num(&format!("{va}min-avg-mspt-to-trigger"), 25.0, 0.0);
-        let gen_chunks_per_second = num("chunk-generation-safeguard.chunks-per-second-threshold", 8.0, 0.0);
-        let gen_emergency_view = num("chunk-generation-safeguard.emergency-view-distance", 8.0, -1.0) as i32;
-        let memory_min_free_percent = num("memory-safeguard.min-free-percent", 15.0, 0.0);
-        let grace_sim = num("startup-grace.simulation-distance", 4.0, 2.0) as i32;
-        let grace_view = num("startup-grace.view-distance", 6.0, 2.0) as i32;
-        let grace_ticks = num("startup-grace.duration-ticks", 6000.0, 0.0) as u64;
-        let afk_minutes = num("afk-player-throttling.afk-time-minutes", 5.0, 0.0);
-        let afk_sim = num("afk-player-throttling.afk-simulation-distance", 4.0, 2.0) as i32;
-        let afk_view = num("afk-player-throttling.afk-view-distance", 6.0, 2.0) as i32;
-        let ping_threshold_ms = num("ping-throttling.ping-threshold-ms", 200.0, 0.0);
-        let ping_checks = num("ping-throttling.checks-before-throttle", 3.0, 1.0) as u32;
-        let ping_sim = num("ping-throttling.ping-simulation-distance", 4.0, 2.0) as i32;
-        let ping_view = num("ping-throttling.ping-view-distance", 6.0, 2.0) as i32;
+        let gen_chunks_per_second = clamp("chunk-generation-safeguard.chunks-per-second-threshold", 8.0, 1.0, f64::MAX);
+        let gen_emergency_view = {
+            let raw = clamp("chunk-generation-safeguard.emergency-view-distance", 8.0, f64::MIN, f64::MAX) as i32;
+            // Zero or less switches the clamp off; otherwise it is a distance of 2 to 32.
+            if raw > 0 { raw.clamp(2, 32) } else { raw }
+        };
+        let memory_min_free_percent = clamp("memory-safeguard.min-free-percent", 15.0, 0.0, 95.0);
+        let grace_sim = clamp("startup-grace.simulation-distance", 4.0, 2.0, 32.0) as i32;
+        let grace_view = (clamp("startup-grace.view-distance", 6.0, 2.0, 32.0) as i32).max(grace_sim);
+        let grace_ticks = clamp("startup-grace.duration-ticks", 6000.0, 20.0, f64::MAX) as u64;
+        let afk_minutes = clamp("afk-player-throttling.afk-time-minutes", 5.0, 1.0, f64::MAX).trunc();
+        let afk_sim = clamp("afk-player-throttling.afk-simulation-distance", 4.0, 2.0, 32.0) as i32;
+        let afk_view = (clamp("afk-player-throttling.afk-view-distance", 6.0, 2.0, 32.0) as i32).max(afk_sim);
+        let ping_threshold_ms = clamp("ping-throttling.ping-threshold-ms", 200.0, 0.0, f64::MAX).trunc();
+        let ping_checks = clamp("ping-throttling.checks-before-throttle", 3.0, 1.0, f64::MAX) as u32;
+        let ping_sim = clamp("ping-throttling.ping-simulation-distance", 4.0, 2.0, 32.0) as i32;
+        let ping_view = (clamp("ping-throttling.ping-view-distance", 6.0, 2.0, 32.0) as i32).max(ping_sim);
         let prefix = |key: &str, default: &str| -> String {
             let mut p = v.get(key).filter(|p| !p.is_empty()).unwrap_or(default).to_ascii_lowercase();
             if !p.ends_with('.') {
@@ -193,26 +212,23 @@ impl Config {
         };
         let fixed_view_prefix = prefix("per-player-fixed-view-distance.permission-prefix", "viewdistancetweaks.fixed.");
         let fixed_sim_prefix = prefix("per-player-fixed-simulation-distance.permission-prefix", "viewdistancetweaks.simfixed.");
-        let cluster_radius = num("density-based-scaling.cluster-radius", 8.0, 0.0) as i32;
-        let cluster_threshold = num("density-based-scaling.cluster-player-threshold", 5.0, 1.0) as u32;
+        let cluster_radius = clamp("density-based-scaling.cluster-radius", 8.0, 1.0, f64::MAX) as i32;
+        let cluster_threshold = clamp("density-based-scaling.cluster-player-threshold", 5.0, 2.0, f64::MAX) as u32;
         let max_bonus = num("density-based-scaling.max-bonus", 4.0, 0.0) as i32;
         let relief_recover_mspt = num("emergency-relief.recover-below-mspt", 40.0, 0.0);
         let diag_interval_seconds = num("diagnostics.interval-seconds", 60.0, 10.0) as u64;
         let diag_extra_above_mspt = num("diagnostics.extra-sample-above-mspt", 0.0, 0.0);
-        let diag_max_file_mb = num("diagnostics.max-file-size-mb", 50.0, 0.0);
+        let diag_max_file_mb = clamp("diagnostics.max-file-size-mb", 50.0, 1.0, f64::MAX).trunc();
         let diag_keep_days = num("diagnostics.keep-days", 7.0, 1.0) as u64;
         let notify_min_permission = num("notify-min-permission", 1.0, 0.0).min(4.0) as u8;
         let command_min_permission = num("command-min-permission", 1.0, 0.0).min(4.0) as u8;
         let w = "world-settings.default.";
         let chunk_weight = num(&format!("{w}chunk-weight"), 1.0, 0.0);
-        let mut min_sim = num(&format!("{w}simulation-distance.min-simulation-distance"), 4.0, 2.0) as i32;
-        let mut max_sim = num(&format!("{w}simulation-distance.max-simulation-distance"), 12.0, 2.0) as i32;
-        let mut min_view = num(&format!("{w}view-distance.min-view-distance"), 6.0, 2.0) as i32;
-        let mut max_view = num(&format!("{w}view-distance.max-view-distance"), 16.0, 2.0) as i32;
-        if min_sim > max_sim || min_view > max_view {
-            bad.push("world-settings: a minimum above its maximum, using the defaults".into());
-            (min_sim, max_sim, min_view, max_view) = (4, 12, 6, 16);
-        }
+        // Each distance is clamped to 2..32 and a maximum is raised to its minimum, as the original does.
+        let min_sim = clamp(&format!("{w}simulation-distance.min-simulation-distance"), 4.0, 2.0, 32.0) as i32;
+        let max_sim = (clamp(&format!("{w}simulation-distance.max-simulation-distance"), 12.0, 2.0, 32.0) as i32).max(min_sim);
+        let min_view = clamp(&format!("{w}view-distance.min-view-distance"), 6.0, 2.0, 32.0) as i32;
+        let max_view = (clamp(&format!("{w}view-distance.max-view-distance"), 16.0, 2.0, 32.0) as i32).max(min_view);
         let mode = match v.get("adjustment-mode").map(|s| s.to_ascii_lowercase()).as_deref() {
             None | Some("mixed") => Mode::Mixed,
             Some("proactive") => Mode::Proactive,
@@ -314,6 +330,7 @@ impl Config {
             min_view,
             max_view,
         };
+        bad.extend(bad_clamp);
         (cfg, bad)
     }
 
@@ -480,10 +497,28 @@ mod tests {
 
     #[test]
     fn a_bad_value_is_reported_and_replaced() {
-        let (cfg, bad) = Config::parse("ticks-per-check = 0\nadjustment-mode = \"sideways\"\n");
+        let (cfg, bad) = Config::parse("ticks-per-check = \"soon\"\nadjustment-mode = \"sideways\"\n");
         assert_eq!(cfg.ticks_per_check, 200);
         assert_eq!(cfg.mode, Mode::Mixed);
         assert_eq!(bad.len(), 2);
+    }
+
+    #[test]
+    fn numbers_are_clamped_into_their_range_like_the_original() {
+        let text = "ticks-per-check = 0\n[memory-safeguard]\nmin-free-percent = 99\n\
+                    [chunk-generation-safeguard]\nchunks-per-second-threshold = 0\nemergency-view-distance = 0\n\
+                    [world-settings.default.simulation-distance]\nmin-simulation-distance = 40\nmax-simulation-distance = 5\n\
+                    [world-settings.default.view-distance]\nmin-view-distance = 10\nmax-view-distance = 8\n\
+                    [startup-grace]\nsimulation-distance = 9\nview-distance = 3\nduration-ticks = 5\n\
+                    [density-based-scaling]\ncluster-radius = 0\ncluster-player-threshold = 1\n";
+        let (cfg, bad) = Config::parse(text);
+        assert!(bad.is_empty(), "{bad:?}");
+        assert_eq!(cfg.ticks_per_check, 20);
+        assert_eq!(cfg.memory_min_free_percent, 95.0);
+        assert_eq!((cfg.gen_chunks_per_second, cfg.gen_emergency_view), (1.0, 0));
+        assert_eq!((cfg.min_sim, cfg.max_sim, cfg.min_view, cfg.max_view), (32, 32, 10, 10));
+        assert_eq!((cfg.grace_sim, cfg.grace_view, cfg.grace_ticks), (9, 9, 20));
+        assert_eq!((cfg.cluster_radius, cfg.cluster_threshold), (1, 2));
     }
 
     #[test]

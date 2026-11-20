@@ -1,5 +1,9 @@
 # horizon-viewdistance
 
+## Port status
+
+Compared with ViewDistanceTweaks 2.15.0 (a236c49) (estimate): **59 %** of the original's commands, permissions, config keys, messages and features work today; **61 %** once our open Horizon PRs are merged; the engine and SDK figures are not estimated. Estimated count: ~117/~200 items. Status: not yet compiled after the 2026-11-20 round.
+
 > **Unofficial Rust port of ViewDistanceTweaks for the Horizon server (https://github.com/arismoko/horizon). Not affiliated with or endorsed by the ViewDistanceTweaks authors.**
 
 Derived from ViewDistanceTweaks (https://codeberg.org/LucasTHCR/ViewDistanceTweaks, GPL-3.0), version 2.15.0.
@@ -64,10 +68,11 @@ was built for stay off by default:
   `history` (last 20 changes), `simulate` (what the next check would do, nothing applied), `mspt [debug]` (`debug`
   adds the raw tick samples), `enable` / `disable` (until the next restart), `profile [name]`,
   `viewdistance|simulationdistance <value> [world] [--duration <min>]` (a pin the automatic checks keep, until it runs
-  out or the next reload; it works with the mode `off` too), `diagnose on|off|note <text>`. Each usage carries the
-  permission node of the real plugin's sub-command group (`viewdistancetweaks.vdt.command.<group>`, or
-  `viewdistancetweaks.command.vdt` for `/vdt` and `/vdt help`); a permissions mod can grant them, and without one the
-  operator level `command-min-permission` decides. The answer texts are those of the original's `messages.yml`
+  out or the next reload; it works with the mode `off` too), `diagnose [on|off|status|note <text>]`. Every usage is gated by
+  `viewdistancetweaks.command.vdt`; a player then also needs the node of the real plugin's sub-command group
+  (`viewdistancetweaks.vdt.command.<group>`) or gets `No permission.`; a permissions mod can grant them, and without
+  one the operator level `command-min-permission` decides. Any other word after `/vdt` shows the help. Tab completion
+  offers profile names, distance values, `world`, `--duration` and the flags. The answer texts are those of the original's `messages.yml`
   (2.15.0) for the sub-commands listed here; see the Known gaps section for what differs.
 - **Profiles** (`[profiles.<name>]`, `/vdt profile <name>`): overlays for the thresholds, steps, checks and chunk
   targets, plus the hard caps `max-view-distance-cap` / `max-simulation-distance-cap`, applied after every other
@@ -139,10 +144,17 @@ horizon-launcher native-build <path to this folder> --server-output <dir> --vers
 
 ## Known gaps
 
-What does not work yet on arismoko/horizon (each is marked `TODO(arismoko-api: ...)` in `src/lib.rs`):
+- Round 3: `messages.yml` (`config/viewdistance-messages.yml`), `/vdt preset`, `/vdt analyze`, `/vdt doctor` are ported. Still open: `/vdt pregen`, `/vdt update`, per-world sections (one world per Horizon server), per-player ping/AFK distances (no API).
 
-- Per-player view and simulation distances are logged only; nothing is sent to the client.
-- Idle time is not available, so the AFK throttle sees 0 idle ticks; the generated-chunk total stays 0.
+What does not work yet on Horizon main (each is marked `HMOD-GAP(...)` in `src/lib.rs`, see `HMOD_PORT.md`):
+
+- Per-player view and simulation distances are not sent (no player-level setter), and player ping and idle time are
+  not available: the AFK, ping and fixed-by-permission throttles never fire, whatever the README sections above say.
+- The generated-chunk total is counted from `chunk_load` (`new` chunks), all dimensions together.
+- Not ported: `/vdt pregen|update`, the config keys
+  of those features and of per-world settings.
+- `/viewdistancetweaks:vdt` is registered next to `/vdt` (written blind; drop the second label if the host refuses the colon).
+- The variance overload steps down once by `max-decrease-step` (the original adds an extra cut on top of its target).
 
 ## Licence
 
