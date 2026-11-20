@@ -830,7 +830,9 @@ mod tests {
 
     #[test]
     fn an_empty_server_goes_to_the_minimum() {
-        let mut e = engine(&format!("passed-checks-for-increase = 1\n{NO_GRACE}"));
+        // The chunk budget (proactive mode) sends an empty server to the minimum; mixed mode would also take
+        // the reactive increase of a calm server.
+        let mut e = engine(&format!("adjustment-mode = \"proactive\"\npassed-checks-for-increase = 1\n{NO_GRACE}"));
         let (d, _) = run(&mut e, Distances { sim: 6, view: 12 }, 2400 + 200 * 20, &calm(0));
         assert_eq!(d, Distances { sim: 4, view: 10 });
     }
